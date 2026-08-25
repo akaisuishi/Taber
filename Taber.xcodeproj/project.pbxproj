@@ -1,0 +1,358 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B00000000000000000000001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000001 /* AppDelegate.swift */; };
+		B00000000000000000000002 /* TaberApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000002 /* TaberApp.swift */; };
+		B00000000000000000000003 /* SwitcherStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000003 /* SwitcherStyle.swift */; };
+		B00000000000000000000004 /* ShortcutMonitorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000004 /* ShortcutMonitorState.swift */; };
+		B00000000000000000000005 /* WindowInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000005 /* WindowInfo.swift */; };
+		B00000000000000000000006 /* AccessibilityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000006 /* AccessibilityService.swift */; };
+		B00000000000000000000007 /* GlobalShortcutMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000007 /* GlobalShortcutMonitor.swift */; };
+		B00000000000000000000008 /* LaunchAtLoginService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000008 /* LaunchAtLoginService.swift */; };
+		B00000000000000000000009 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000009 /* SettingsStore.swift */; };
+		B0000000000000000000000A /* WindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000A /* WindowManager.swift */; };
+		B0000000000000000000000B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000B /* SettingsView.swift */; };
+		B0000000000000000000000C /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000C /* SettingsWindowController.swift */; };
+		B0000000000000000000000D /* StatusBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000D /* StatusBarController.swift */; };
+		B0000000000000000000000E /* SwitcherPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000E /* SwitcherPanelController.swift */; };
+		B0000000000000000000000F /* SwitcherView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000F /* SwitcherView.swift */; };
+		B00000000000000000000010 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000010 /* Assets.xcassets */; };
+		B00000000000000000000011 /* WindowEligibilityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000012 /* WindowEligibilityPolicy.swift */; };
+		B00000000000000000000012 /* WindowThumbnailService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000013 /* WindowThumbnailService.swift */; };
+		B00000000000000000000013 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000014 /* AppTheme.swift */; };
+		B00000000000000000000014 /* SwitcherSize.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000015 /* SwitcherSize.swift */; };
+		B00000000000000000000015 /* SpaceResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000016 /* SpaceResolver.swift */; };
+		B00000000000000000000016 /* SearchShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000017 /* SearchShortcut.swift */; };
+		B00000000000000000000017 /* WindowSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000018 /* WindowSearchService.swift */; };
+		B00000000000000000000018 /* AccessibilityWindowIdentityResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000019 /* AccessibilityWindowIdentityResolver.swift */; };
+		B00000000000000000000019 /* WindowMatchingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000001A /* WindowMatchingPolicy.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		C00000000000000000000001 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		C00000000000000000000002 /* TaberApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaberApp.swift; sourceTree = "<group>"; };
+		C00000000000000000000003 /* SwitcherStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwitcherStyle.swift; sourceTree = "<group>"; };
+		C00000000000000000000004 /* ShortcutMonitorState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutMonitorState.swift; sourceTree = "<group>"; };
+		C00000000000000000000005 /* WindowInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowInfo.swift; sourceTree = "<group>"; };
+		C00000000000000000000006 /* AccessibilityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityService.swift; sourceTree = "<group>"; };
+		C00000000000000000000007 /* GlobalShortcutMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcutMonitor.swift; sourceTree = "<group>"; };
+		C00000000000000000000008 /* LaunchAtLoginService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLoginService.swift; sourceTree = "<group>"; };
+		C00000000000000000000009 /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
+		C0000000000000000000000A /* WindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowManager.swift; sourceTree = "<group>"; };
+		C0000000000000000000000B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		C0000000000000000000000C /* SettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowController.swift; sourceTree = "<group>"; };
+		C0000000000000000000000D /* StatusBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarController.swift; sourceTree = "<group>"; };
+		C0000000000000000000000E /* SwitcherPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwitcherPanelController.swift; sourceTree = "<group>"; };
+		C0000000000000000000000F /* SwitcherView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwitcherView.swift; sourceTree = "<group>"; };
+		C00000000000000000000010 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C00000000000000000000011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		C00000000000000000000012 /* WindowEligibilityPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowEligibilityPolicy.swift; sourceTree = "<group>"; };
+		C00000000000000000000013 /* WindowThumbnailService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowThumbnailService.swift; sourceTree = "<group>"; };
+		C00000000000000000000014 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
+		C00000000000000000000015 /* SwitcherSize.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwitcherSize.swift; sourceTree = "<group>"; };
+		C00000000000000000000016 /* SpaceResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceResolver.swift; sourceTree = "<group>"; };
+		C00000000000000000000017 /* SearchShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchShortcut.swift; sourceTree = "<group>"; };
+		C00000000000000000000018 /* WindowSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowSearchService.swift; sourceTree = "<group>"; };
+		C00000000000000000000019 /* AccessibilityWindowIdentityResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityWindowIdentityResolver.swift; sourceTree = "<group>"; };
+		C0000000000000000000001A /* WindowMatchingPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowMatchingPolicy.swift; sourceTree = "<group>"; };
+		C000000000000000000000FF /* Taber.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Taber.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		E00000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		D00000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				D00000000000000000000002 /* Sources */,
+				D00000000000000000000007 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D00000000000000000000002 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				D00000000000000000000003 /* Taber */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		D00000000000000000000003 /* Taber */ = {
+			isa = PBXGroup;
+			children = (
+				C00000000000000000000001 /* AppDelegate.swift */,
+				C00000000000000000000002 /* TaberApp.swift */,
+				D00000000000000000000004 /* Models */,
+				D00000000000000000000005 /* Services */,
+				D00000000000000000000006 /* UI */,
+				D00000000000000000000008 /* Resources */,
+			);
+			path = Taber;
+			sourceTree = "<group>";
+		};
+		D00000000000000000000004 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				C00000000000000000000003 /* SwitcherStyle.swift */,
+				C00000000000000000000004 /* ShortcutMonitorState.swift */,
+				C00000000000000000000005 /* WindowInfo.swift */,
+				C00000000000000000000014 /* AppTheme.swift */,
+				C00000000000000000000015 /* SwitcherSize.swift */,
+				C00000000000000000000017 /* SearchShortcut.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		D00000000000000000000005 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				C00000000000000000000006 /* AccessibilityService.swift */,
+				C00000000000000000000007 /* GlobalShortcutMonitor.swift */,
+				C00000000000000000000008 /* LaunchAtLoginService.swift */,
+				C00000000000000000000009 /* SettingsStore.swift */,
+				C0000000000000000000000A /* WindowManager.swift */,
+				C00000000000000000000012 /* WindowEligibilityPolicy.swift */,
+				C00000000000000000000013 /* WindowThumbnailService.swift */,
+				C00000000000000000000016 /* SpaceResolver.swift */,
+				C00000000000000000000018 /* WindowSearchService.swift */,
+				C00000000000000000000019 /* AccessibilityWindowIdentityResolver.swift */,
+				C0000000000000000000001A /* WindowMatchingPolicy.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		D00000000000000000000006 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				C0000000000000000000000B /* SettingsView.swift */,
+				C0000000000000000000000C /* SettingsWindowController.swift */,
+				C0000000000000000000000D /* StatusBarController.swift */,
+				C0000000000000000000000E /* SwitcherPanelController.swift */,
+				C0000000000000000000000F /* SwitcherView.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		D00000000000000000000007 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C000000000000000000000FF /* Taber.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		D00000000000000000000008 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				C00000000000000000000010 /* Assets.xcassets */,
+				C00000000000000000000011 /* Info.plist */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		F00000000000000000000001 /* Taber */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = H00000000000000000000002 /* Build configuration list for PBXNativeTarget "Taber" */;
+			buildPhases = (
+				E00000000000000000000002 /* Sources */,
+				E00000000000000000000001 /* Frameworks */,
+				E00000000000000000000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Taber;
+			productName = Taber;
+			productReference = C000000000000000000000FF /* Taber.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A00000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					F00000000000000000000001 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+				};
+			};
+			buildConfigurationList = H00000000000000000000001 /* Build configuration list for PBXProject "Taber" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = D00000000000000000000001;
+			productRefGroup = D00000000000000000000007 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F00000000000000000000001 /* Taber */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		E00000000000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B00000000000000000000010 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		E00000000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B00000000000000000000001 /* AppDelegate.swift in Sources */,
+				B00000000000000000000002 /* TaberApp.swift in Sources */,
+				B00000000000000000000003 /* SwitcherStyle.swift in Sources */,
+				B00000000000000000000004 /* ShortcutMonitorState.swift in Sources */,
+				B00000000000000000000005 /* WindowInfo.swift in Sources */,
+				B00000000000000000000006 /* AccessibilityService.swift in Sources */,
+				B00000000000000000000007 /* GlobalShortcutMonitor.swift in Sources */,
+				B00000000000000000000008 /* LaunchAtLoginService.swift in Sources */,
+				B00000000000000000000009 /* SettingsStore.swift in Sources */,
+				B0000000000000000000000A /* WindowManager.swift in Sources */,
+				B0000000000000000000000B /* SettingsView.swift in Sources */,
+				B0000000000000000000000C /* SettingsWindowController.swift in Sources */,
+				B0000000000000000000000D /* StatusBarController.swift in Sources */,
+				B0000000000000000000000E /* SwitcherPanelController.swift in Sources */,
+				B0000000000000000000000F /* SwitcherView.swift in Sources */,
+				B00000000000000000000011 /* WindowEligibilityPolicy.swift in Sources */,
+				B00000000000000000000012 /* WindowThumbnailService.swift in Sources */,
+				B00000000000000000000013 /* AppTheme.swift in Sources */,
+				B00000000000000000000014 /* SwitcherSize.swift in Sources */,
+				B00000000000000000000015 /* SpaceResolver.swift in Sources */,
+				B00000000000000000000016 /* SearchShortcut.swift in Sources */,
+				B00000000000000000000017 /* WindowSearchService.swift in Sources */,
+				B00000000000000000000018 /* AccessibilityWindowIdentityResolver.swift in Sources */,
+				B00000000000000000000019 /* WindowMatchingPolicy.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		G00000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		G00000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		G00000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 3;
+				DEVELOPMENT_TEAM = 7KG3BTVM9D;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/Taber/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.taber.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		G00000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 3;
+				DEVELOPMENT_TEAM = 7KG3BTVM9D;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/Taber/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.taber.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		H00000000000000000000001 /* Build configuration list for PBXProject "Taber" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				G00000000000000000000001 /* Debug */,
+				G00000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		H00000000000000000000002 /* Build configuration list for PBXNativeTarget "Taber" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				G00000000000000000000003 /* Debug */,
+				G00000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A00000000000000000000001 /* Project object */;
+}
