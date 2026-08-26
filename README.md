@@ -136,6 +136,6 @@ O Taber não envia títulos, imagens ou conteúdo das janelas para nenhum servi�
 
 ## Versionamento
 
-Este repositório começa no estado consolidado do **Taber 1.0.1 (build 3)**. Como não existia um repositório Git antes deste marco, versões intermediárias anteriores não foram recriadas artificialmente. Os próximos commits seguem [Conventional Commits](https://www.conventionalcommits.org/), por exemplo `feat:`, `fix:`, `perf:`, `docs:` e `chore:`.
+Este repositório começou no estado consolidado do **Taber 1.0.1 (build 3)**. A versão atual é **Taber 1.0.2 (build 4)**. Como não existia um repositório Git antes do primeiro marco, versões intermediárias anteriores não foram recriadas artificialmente. Os commits seguem [Conventional Commits](https://www.conventionalcommits.org/), por exemplo `feat:`, `fix:`, `perf:`, `docs:` e `chore:`.
 
 O código é privado e ainda não possui licença de distribuição pública.

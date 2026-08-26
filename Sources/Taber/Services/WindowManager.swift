@@ -365,12 +365,11 @@ final class WindowManager {
         guard isPresentationSized else {
             return .raiseWindow
         }
-        if accessibilityWindow.subrole == kAXDialogSubrole as String {
-            return .activateApplication
-        }
 
         return WindowMatchingPolicy.requiresApplicationActivation(
             isPresentationSized: true,
+            hasExactWindowIDMatch: accessibilityWindow.windowID == candidate.id,
+            isDialog: accessibilityWindow.subrole == kAXDialogSubrole as String,
             candidateTitle: candidate.title,
             candidateBounds: candidate.bounds,
             accessibilityTitle: accessibilityWindow.title,

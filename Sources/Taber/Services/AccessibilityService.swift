@@ -60,9 +60,24 @@ enum AccessibilityService {
                 let minimized = false
                 let selected = true
                 _ = AXUIElementSetAttributeValue(matchingWindow, kAXMinimizedAttribute as CFString, minimized as CFTypeRef)
-                runningApplication?.activate(options: [])
+                // Defina a janela-alvo no processo antes de ativá-lo. Chrome,
+                // Finder e outros apps com várias janelas podem restaurar a
+                // última janela ativa quando o processo é ativado primeiro.
+                // Reafirmar o foco após a ativação cobre implementações AX que
+                // só aceitam a alteração enquanto o aplicativo está ativo.
+                _ = AXUIElementSetAttributeValue(
+                    application,
+                    kAXFocusedWindowAttribute as CFString,
+                    matchingWindow
+                )
                 _ = AXUIElementSetAttributeValue(matchingWindow, kAXMainAttribute as CFString, selected as CFTypeRef)
                 _ = AXUIElementSetAttributeValue(matchingWindow, kAXFocusedAttribute as CFString, selected as CFTypeRef)
+                runningApplication?.activate(options: [])
+                _ = AXUIElementSetAttributeValue(
+                    application,
+                    kAXFocusedWindowAttribute as CFString,
+                    matchingWindow
+                )
                 _ = AXUIElementPerformAction(matchingWindow, kAXRaiseAction as CFString)
                 return
             }

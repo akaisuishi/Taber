@@ -51,12 +51,21 @@ enum WindowMatchingPolicy {
 
     static func requiresApplicationActivation(
         isPresentationSized: Bool,
+        hasExactWindowIDMatch: Bool = false,
+        isDialog: Bool = false,
         candidateTitle: String,
         candidateBounds: CGRect,
         accessibilityTitle: String,
         accessibilityBounds: CGRect
     ) -> Bool {
         guard isPresentationSized else { return false }
+        // Um AXDialog pode ser a superfície destacada de um player e deve
+        // preservar o comportamento de reativar o aplicativo. Fora desse
+        // caso, um WindowID idêntico é a prova mais forte de que temos uma
+        // janela comum específica, mesmo quando ela ocupa quase toda a tela.
+        if isDialog { return true }
+        if hasExactWindowIDMatch { return false }
+
         let geometryMatches = approximatelyEqual(
             candidateBounds,
             accessibilityBounds,

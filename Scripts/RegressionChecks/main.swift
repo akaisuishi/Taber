@@ -82,6 +82,31 @@ do {
 
     try expect(
         !WindowMatchingPolicy.requiresApplicationActivation(
+            isPresentationSized: true,
+            hasExactWindowIDMatch: true,
+            candidateTitle: "Nova guia anônima",
+            candidateBounds: CGRect(x: 0, y: 39, width: 1710, height: 1015),
+            accessibilityTitle: "Nova guia anônima",
+            accessibilityBounds: CGRect(x: 0, y: 39, width: 1710, height: 1073)
+        ),
+        "uma janela maximizada do Chrome com ID exato não pode virar fullscreen de conteúdo"
+    )
+
+    try expect(
+        WindowMatchingPolicy.requiresApplicationActivation(
+            isPresentationSized: true,
+            hasExactWindowIDMatch: true,
+            isDialog: true,
+            candidateTitle: "YouTube",
+            candidateBounds: CGRect(x: 0, y: 0, width: 1710, height: 1112),
+            accessibilityTitle: "YouTube",
+            accessibilityBounds: CGRect(x: 0, y: 0, width: 1710, height: 1112)
+        ),
+        "um AXDialog de mídia deve preservar a ativação do navegador"
+    )
+
+    try expect(
+        !WindowMatchingPolicy.requiresApplicationActivation(
             isPresentationSized: false,
             candidateTitle: "YouTube",
             candidateBounds: commonBounds,
