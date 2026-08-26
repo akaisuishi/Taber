@@ -29,6 +29,41 @@ do {
         "um identificador realmente único deve continuar sendo usado"
     )
 
+    try expect(
+        WindowMatchingPolicy.preferredFrontmostIndex(
+            frontmostPID: 42,
+            candidates: [
+                (ownerPID: 42, isMinimized: false, isFocused: false),
+                (ownerPID: 42, isMinimized: false, isFocused: true),
+                (ownerPID: 81, isMinimized: false, isFocused: false)
+            ]
+        ) == 1,
+        "a janela AX focada deve vencer a ordem visual entre janelas do mesmo aplicativo"
+    )
+
+    try expect(
+        WindowMatchingPolicy.preferredFrontmostIndex(
+            frontmostPID: 42,
+            candidates: [
+                (ownerPID: 81, isMinimized: false, isFocused: true),
+                (ownerPID: 42, isMinimized: false, isFocused: false),
+                (ownerPID: 42, isMinimized: false, isFocused: false)
+            ]
+        ) == 1,
+        "uma janela focada de outro processo não pode virar a janela atual"
+    )
+
+    try expect(
+        WindowMatchingPolicy.preferredFrontmostIndex(
+            frontmostPID: 42,
+            candidates: [
+                (ownerPID: 42, isMinimized: true, isFocused: true),
+                (ownerPID: 42, isMinimized: false, isFocused: false)
+            ]
+        ) == 1,
+        "sem foco AX utilizável, a primeira janela não minimizada continua sendo o fallback"
+    )
+
     let commonBounds = CGRect(x: 100, y: 80, width: 1280, height: 720)
     try expect(
         WindowMatchingPolicy.fallbackScore(

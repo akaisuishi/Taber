@@ -1,4 +1,5 @@
 import CoreGraphics
+import Darwin
 import Foundation
 
 enum WindowMatchingPolicy {
@@ -47,6 +48,21 @@ enum WindowMatchingPolicy {
             candidateIdentifiers[$0] == targetIdentifier
         }
         return matches.count == 1 ? matches[0] : nil
+    }
+
+    static func preferredFrontmostIndex(
+        frontmostPID: pid_t?,
+        candidates: [(ownerPID: pid_t, isMinimized: Bool, isFocused: Bool)]
+    ) -> Int? {
+        guard let frontmostPID else { return nil }
+        if let focusedIndex = candidates.firstIndex(where: {
+            $0.ownerPID == frontmostPID && !$0.isMinimized && $0.isFocused
+        }) {
+            return focusedIndex
+        }
+        return candidates.firstIndex {
+            $0.ownerPID == frontmostPID && !$0.isMinimized
+        }
     }
 
     static func requiresApplicationActivation(

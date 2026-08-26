@@ -47,6 +47,7 @@ struct WindowInfo: Identifiable, Hashable {
     let icon: NSImage?
     let accessibilityIdentifier: String
     let accessibilityOrdinal: Int?
+    let isAccessibilityFocused: Bool
     let titleOccurrence: Int?
     let titleOccurrenceCount: Int
 
@@ -67,6 +68,7 @@ struct WindowInfo: Identifiable, Hashable {
         icon: NSImage?,
         accessibilityIdentifier: String = "",
         accessibilityOrdinal: Int? = nil,
+        isAccessibilityFocused: Bool = false,
         titleOccurrence: Int? = nil,
         titleOccurrenceCount: Int = 1
     ) {
@@ -86,6 +88,7 @@ struct WindowInfo: Identifiable, Hashable {
         self.icon = icon
         self.accessibilityIdentifier = accessibilityIdentifier
         self.accessibilityOrdinal = accessibilityOrdinal
+        self.isAccessibilityFocused = isAccessibilityFocused
         self.titleOccurrence = titleOccurrence
         self.titleOccurrenceCount = titleOccurrenceCount
     }
@@ -131,6 +134,7 @@ struct WindowInfo: Identifiable, Hashable {
         accessibilityTitle: String,
         isMinimized: Bool,
         isFullScreen: Bool,
+        isFocused: Bool,
         activationMode: WindowActivationMode? = nil
     ) -> WindowInfo {
         WindowInfo(
@@ -150,6 +154,7 @@ struct WindowInfo: Identifiable, Hashable {
             icon: icon,
             accessibilityIdentifier: identifier,
             accessibilityOrdinal: ordinal,
+            isAccessibilityFocused: isFocused,
             titleOccurrence: titleOccurrence,
             titleOccurrenceCount: titleOccurrenceCount
         )
@@ -173,6 +178,7 @@ struct WindowInfo: Identifiable, Hashable {
             icon: icon,
             accessibilityIdentifier: accessibilityIdentifier,
             accessibilityOrdinal: accessibilityOrdinal,
+            isAccessibilityFocused: isAccessibilityFocused,
             titleOccurrence: occurrence,
             titleOccurrenceCount: count
         )
@@ -196,6 +202,7 @@ struct WindowInfo: Identifiable, Hashable {
             icon: icon,
             accessibilityIdentifier: accessibilityIdentifier,
             accessibilityOrdinal: accessibilityOrdinal,
+            isAccessibilityFocused: isAccessibilityFocused,
             titleOccurrence: titleOccurrence,
             titleOccurrenceCount: titleOccurrenceCount
         )

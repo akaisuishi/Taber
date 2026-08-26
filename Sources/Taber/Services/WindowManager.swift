@@ -215,6 +215,7 @@ final class WindowManager {
                     isMinimized: accessibilityWindow.isMinimized,
                     isFullScreen: candidate.isFullScreen
                         || candidateActivationMode == .activateApplication,
+                    isFocused: accessibilityWindow.isFocused || accessibilityWindow.isMain,
                     activationMode: candidateActivationMode
                 ),
                 accessibility: accessibilityWindow
@@ -260,6 +261,7 @@ final class WindowManager {
                     accessibilityTitle: host.title,
                     isMinimized: false,
                     isFullScreen: true,
+                    isFocused: host.isFocused || host.isMain,
                     activationMode: .activateApplication
                 )
                 hostIndicesToRemove.insert(presentationIndex)
@@ -296,6 +298,7 @@ final class WindowManager {
                 accessibilityTitle: host.title,
                 isMinimized: false,
                 isFullScreen: true,
+                isFocused: host.isFocused || host.isMain,
                 activationMode: .activateApplication
             )
         }
@@ -318,6 +321,14 @@ final class WindowManager {
     ) -> [AccessibilityWindowSnapshot] {
         let application = AXUIElementCreateApplication(ownerPID)
         AXUIElementSetMessagingTimeout(application, 0.20)
+        let focusedWindow = elementAttribute(
+            kAXFocusedWindowAttribute as CFString,
+            from: application
+        )
+        let mainWindow = elementAttribute(
+            kAXMainWindowAttribute as CFString,
+            from: application
+        )
 
         var windowsValue: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
@@ -340,16 +351,22 @@ final class WindowManager {
                   let bounds = bounds(of: element)
             else { return nil }
 
+            let windowID = AccessibilityWindowIdentityResolver.windowID(for: element)
+            let isFocused = boolAttribute(kAXFocusedAttribute as CFString, from: element)
+                || focusedWindow.map { CFEqual(element, $0) } == true
+            let isMain = boolAttribute(kAXMainAttribute as CFString, from: element)
+                || mainWindow.map { CFEqual(element, $0) } == true
+
             return AccessibilityWindowSnapshot(
-                windowID: AccessibilityWindowIdentityResolver.windowID(for: element),
+                windowID: windowID,
                 identifier: stringAttribute(kAXIdentifierAttribute as CFString, from: element),
                 title: stringAttribute(kAXTitleAttribute as CFString, from: element),
                 document: stringAttribute(kAXDocumentAttribute as CFString, from: element),
                 subrole: subrole,
                 bounds: bounds,
                 isMinimized: boolAttribute(kAXMinimizedAttribute as CFString, from: element),
-                isMain: boolAttribute(kAXMainAttribute as CFString, from: element),
-                isFocused: boolAttribute(kAXFocusedAttribute as CFString, from: element),
+                isMain: isMain,
+                isFocused: isFocused,
                 ordinal: ordinal
             )
         }
@@ -500,6 +517,15 @@ final class WindowManager {
         return (value as? NSNumber)?.boolValue ?? false
     }
 
+    private func elementAttribute(_ attribute: CFString, from element: AXUIElement) -> AXUIElement? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
+              let value,
+              CFGetTypeID(value) == AXUIElementGetTypeID()
+        else { return nil }
+        return (value as! AXUIElement)
+    }
+
     private func bounds(of element: AXUIElement) -> CGRect? {
         var positionValue: CFTypeRef?
         var sizeValue: CFTypeRef?
@@ -601,7 +627,18 @@ final class WindowManager {
 
     func frontmostWindow() -> WindowInfo? {
         let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        return windows.first { $0.ownerPID == frontmostPID && !$0.isMinimized }
+        let candidates = windows.map {
+            (
+                ownerPID: $0.ownerPID,
+                isMinimized: $0.isMinimized,
+                isFocused: $0.isAccessibilityFocused
+            )
+        }
+        guard let index = WindowMatchingPolicy.preferredFrontmostIndex(
+            frontmostPID: frontmostPID,
+            candidates: candidates
+        ) else { return nil }
+        return windows[index]
     }
 
     func activate(_ window: WindowInfo) {
