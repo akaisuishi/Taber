@@ -1,9 +1,12 @@
 import AppKit
 @preconcurrency import ApplicationServices
 import CoreGraphics
+import os
 
 @MainActor
 enum AccessibilityService {
+    private static let logger = Logger(subsystem: "com.taber.app", category: "accessibility")
+
     private struct WindowCandidate {
         let element: AXUIElement
         let windowID: CGWindowID?
@@ -41,7 +44,10 @@ enum AccessibilityService {
         // Fullscreen de mídia em navegadores é apresentado por uma superfície
         // separada que não pertence a kAXWindows. Levantar a janela AX normal
         // encobre essa superfície; somente reativar o app preserva o vídeo.
-        if window.activationMode == .activateApplication {
+        if WindowMatchingPolicy.shouldActivateApplicationWithoutRestoring(
+            usesApplicationOnlyActivation: window.activationMode == .activateApplication,
+            isMinimized: window.isMinimized
+        ) {
             runningApplication?.activate(options: [])
             return
         }
@@ -59,7 +65,11 @@ enum AccessibilityService {
             if let matchingWindow {
                 let minimized = false
                 let selected = true
-                _ = AXUIElementSetAttributeValue(matchingWindow, kAXMinimizedAttribute as CFString, minimized as CFTypeRef)
+                let initialRestoreResult = AXUIElementSetAttributeValue(
+                    matchingWindow,
+                    kAXMinimizedAttribute as CFString,
+                    minimized as CFTypeRef
+                )
                 // Defina a janela-alvo no processo antes de ativá-lo. Chrome,
                 // Finder e outros apps com várias janelas podem restaurar a
                 // última janela ativa quando o processo é ativado primeiro.
@@ -73,17 +83,72 @@ enum AccessibilityService {
                 _ = AXUIElementSetAttributeValue(matchingWindow, kAXMainAttribute as CFString, selected as CFTypeRef)
                 _ = AXUIElementSetAttributeValue(matchingWindow, kAXFocusedAttribute as CFString, selected as CFTypeRef)
                 runningApplication?.activate(options: [])
+                // Alguns aplicativos só aceitam sair do Dock depois de terem
+                // sido ativados. Reaplique AXMinimized=false após a ativação.
+                let activatedRestoreResult = AXUIElementSetAttributeValue(
+                    matchingWindow,
+                    kAXMinimizedAttribute as CFString,
+                    minimized as CFTypeRef
+                )
                 _ = AXUIElementSetAttributeValue(
                     application,
                     kAXFocusedWindowAttribute as CFString,
                     matchingWindow
                 )
                 _ = AXUIElementPerformAction(matchingWindow, kAXRaiseAction as CFString)
+                if window.isMinimized {
+                    logger.notice(
+                        "Restauração solicitada: pid=\(window.ownerPID) janela=\(window.id) inicial=\(initialRestoreResult.rawValue) apósAtivação=\(activatedRestoreResult.rawValue)"
+                    )
+                    scheduleRestoreVerification(
+                        application: application,
+                        matchingWindow: matchingWindow,
+                        runningApplication: runningApplication,
+                        windowID: window.id
+                    )
+                }
                 return
             }
         }
 
         runningApplication?.activate(options: [])
+    }
+
+    private static func scheduleRestoreVerification(
+        application: AXUIElement,
+        matchingWindow: AXUIElement,
+        runningApplication: NSRunningApplication?,
+        windowID: CGWindowID
+    ) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(100))
+            guard boolAttribute(kAXMinimizedAttribute as CFString, from: matchingWindow) else {
+                return
+            }
+
+            let minimized = false
+            let selected = true
+            let retryResult = AXUIElementSetAttributeValue(
+                matchingWindow,
+                kAXMinimizedAttribute as CFString,
+                minimized as CFTypeRef
+            )
+            runningApplication?.activate(options: [])
+            _ = AXUIElementSetAttributeValue(
+                application,
+                kAXFocusedWindowAttribute as CFString,
+                matchingWindow
+            )
+            _ = AXUIElementSetAttributeValue(
+                matchingWindow,
+                kAXMainAttribute as CFString,
+                selected as CFTypeRef
+            )
+            _ = AXUIElementPerformAction(matchingWindow, kAXRaiseAction as CFString)
+            logger.notice(
+                "Restauração AX repetida: janela=\(windowID) resultado=\(retryResult.rawValue)"
+            )
+        }
     }
 
     private static func bestMatchingWindow(

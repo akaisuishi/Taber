@@ -3,6 +3,25 @@ import Darwin
 import Foundation
 
 enum WindowMatchingPolicy {
+    static func shouldReconcileWithAccessibility(
+        candidateCount: Int,
+        containsOffscreenWindow: Bool,
+        containsFullScreenWindow: Bool,
+        isFrontmostApplication: Bool
+    ) -> Bool {
+        isFrontmostApplication
+            || candidateCount > 1
+            || containsOffscreenWindow
+            || containsFullScreenWindow
+    }
+
+    static func shouldActivateApplicationWithoutRestoring(
+        usesApplicationOnlyActivation: Bool,
+        isMinimized: Bool
+    ) -> Bool {
+        usesApplicationOnlyActivation && !isMinimized
+    }
+
     static func fallbackScore(
         candidateTitle: String,
         candidateBounds: CGRect,

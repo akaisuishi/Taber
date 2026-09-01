@@ -14,6 +14,42 @@ private func expect(_ condition: @autoclosure () -> Bool, _ message: String) thr
 
 do {
     try expect(
+        WindowMatchingPolicy.shouldReconcileWithAccessibility(
+            candidateCount: 1,
+            containsOffscreenWindow: false,
+            containsFullScreenWindow: false,
+            isFrontmostApplication: true
+        ),
+        "o aplicativo em primeiro plano deve confirmar no AX uma minimização recém-solicitada"
+    )
+
+    try expect(
+        !WindowMatchingPolicy.shouldReconcileWithAccessibility(
+            candidateCount: 1,
+            containsOffscreenWindow: false,
+            containsFullScreenWindow: false,
+            isFrontmostApplication: false
+        ),
+        "uma janela comum em segundo plano deve preservar o caminho rápido"
+    )
+
+    try expect(
+        !WindowMatchingPolicy.shouldActivateApplicationWithoutRestoring(
+            usesApplicationOnlyActivation: true,
+            isMinimized: true
+        ),
+        "uma janela minimizada nunca pode ignorar AXMinimized=false"
+    )
+
+    try expect(
+        WindowMatchingPolicy.shouldActivateApplicationWithoutRestoring(
+            usesApplicationOnlyActivation: true,
+            isMinimized: false
+        ),
+        "fullscreen de mídia não minimizado deve continuar preservando sua superfície"
+    )
+
+    try expect(
         WindowMatchingPolicy.uniqueIdentifierIndex(
             targetIdentifier: "FinderWindow",
             candidateIdentifiers: ["FinderWindow", "FinderWindow"]

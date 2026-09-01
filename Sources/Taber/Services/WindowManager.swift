@@ -35,6 +35,7 @@ final class WindowManager {
         }
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let workspace = NSWorkspace.shared
+        let frontmostPID = workspace.frontmostApplication?.processIdentifier
         let runningApplications: [pid_t: NSRunningApplication] = Dictionary(uniqueKeysWithValues: workspace.runningApplications.compactMap { application -> (pid_t, NSRunningApplication)? in
             guard application.localizedName != nil else { return nil }
             return (application.processIdentifier, application)
@@ -112,7 +113,8 @@ final class WindowManager {
             let selected = canonicalWindows(
                 from: applicationCandidates,
                 ownerPID: ownerPID,
-                includeUtilityWindows: includeUtilityWindows
+                includeUtilityWindows: includeUtilityWindows,
+                isFrontmostApplication: ownerPID == frontmostPID
             )
             for window in selected {
                 canonicalWindowsByID[window.id] = window
@@ -148,11 +150,18 @@ final class WindowManager {
     private func canonicalWindows(
         from candidates: [WindowInfo],
         ownerPID: pid_t,
-        includeUtilityWindows: Bool
+        includeUtilityWindows: Bool,
+        isFrontmostApplication: Bool
     ) -> [WindowInfo] {
-        let needsAccessibilityReconciliation = candidates.count > 1
-            || candidates.contains(where: { !$0.isOnScreen })
-            || candidates.contains(where: { $0.isFullScreen })
+        // O WindowServer pode levar alguns milissegundos para refletir um
+        // Command + M. O aplicativo em primeiro plano precisa ser confirmado
+        // via AX mesmo quando só possui uma superfície ainda marcada on-screen.
+        let needsAccessibilityReconciliation = WindowMatchingPolicy.shouldReconcileWithAccessibility(
+            candidateCount: candidates.count,
+            containsOffscreenWindow: candidates.contains(where: { !$0.isOnScreen }),
+            containsFullScreenWindow: candidates.contains(where: { $0.isFullScreen }),
+            isFrontmostApplication: isFrontmostApplication
+        )
         guard needsAccessibilityReconciliation else { return candidates }
 
         let accessibilityWindows = accessibilityWindows(
