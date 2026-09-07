@@ -184,11 +184,19 @@ final class GlobalShortcutMonitor: ObservableObject {
     private var retryTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
     private let logger = Logger(subsystem: "com.taber.app", category: "shortcut")
+    private let now: () -> TimeInterval
+    private let activate: (WindowInfo) -> Void
 
-    init(windowManager: WindowManager, settings: SettingsStore, panelController: SwitcherPanelController) {
+    init(windowManager: WindowManager, settings: SettingsStore, panelController: SwitcherPanelController,
+         initialState: ShortcutMonitorState = .disabled,
+         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         activate: ((WindowInfo) -> Void)? = nil) {
         self.windowManager = windowManager
         self.settings = settings
         self.panelController = panelController
+        self.state = initialState
+        self.now = now
+        self.activate = activate ?? { windowManager.activate($0) }
         searchShortcutForEventTap = settings.searchShortcut
         keepSearchOpenForEventTap = settings.keepSearchOpen
 
@@ -302,7 +310,7 @@ final class GlobalShortcutMonitor: ObservableObject {
         logger.info("Command + Tab event tap ativo no nível \(location.taberDescription, privacy: .public)")
     }
 
-    fileprivate func reenableEventTap() {
+    func reenableEventTap() {
         guard let eventTap else {
             installEventTapIfPossible()
             return
@@ -311,7 +319,7 @@ final class GlobalShortcutMonitor: ObservableObject {
         state = .active
     }
 
-    fileprivate func beginOrAdvanceCycle(reverse: Bool) {
+    func beginOrAdvanceCycle(reverse: Bool) {
         guard settings.shortcutEnabled, state == .active else { return }
 
         if !isCycling {
@@ -341,7 +349,7 @@ final class GlobalShortcutMonitor: ObservableObject {
         }
     }
 
-    fileprivate func navigate(using keyCode: Int64) {
+    func navigate(using keyCode: Int64) {
         guard isCycling, !cycleWindows.isEmpty else { return }
 
         let delta: Int?
@@ -370,18 +378,18 @@ final class GlobalShortcutMonitor: ObservableObject {
         panelController.update(selectedIndex: selectedIndex)
     }
 
-    fileprivate func moveSearchSelection(reverse: Bool) {
+    func moveSearchSelection(reverse: Bool) {
         guard isSearchActiveForEventTap else { return }
         moveSelection(by: reverse ? -1 : 1)
     }
 
-    fileprivate func handleSearchShiftPress() {
+    func handleSearchShiftPress() {
         guard isCycling,
               !isSearchActiveForEventTap,
               settings.searchShortcut == .doubleShift
         else { return }
 
-        let now = ProcessInfo.processInfo.systemUptime
+        let now = now()
         if let previous = lastSearchShiftPress, now - previous <= 0.48 {
             lastSearchShiftPress = nil
             enterSearch()
@@ -390,7 +398,7 @@ final class GlobalShortcutMonitor: ObservableObject {
         }
     }
 
-    fileprivate func enterSearch() {
+    func enterSearch() {
         guard isCycling, !isSearchActiveForEventTap else { return }
         isSearchActiveForEventTap = true
         isSearchDetachedForEventTap = false
@@ -404,7 +412,7 @@ final class GlobalShortcutMonitor: ObservableObject {
         )
     }
 
-    fileprivate func handleSearchInput(keyCode: Int64, text: String) {
+    func handleSearchInput(keyCode: Int64, text: String) {
         guard isCycling, isSearchActiveForEventTap else { return }
 
         switch keyCode {
@@ -427,7 +435,7 @@ final class GlobalShortcutMonitor: ObservableObject {
         applySearchQuery()
     }
 
-    fileprivate func handleEscape() {
+    func handleEscape() {
         if isSearchDetachedForEventTap {
             cancelCycle()
         } else if isSearchActiveForEventTap {
@@ -437,7 +445,7 @@ final class GlobalShortcutMonitor: ObservableObject {
         }
     }
 
-    fileprivate func detachSearchFromCommand() {
+    func detachSearchFromCommand() {
         guard isCycling,
               isSearchActiveForEventTap,
               settings.keepSearchOpen,
@@ -489,7 +497,7 @@ final class GlobalShortcutMonitor: ObservableObject {
         )
     }
 
-    fileprivate func cancelCycle() {
+    func cancelCycle() {
         guard isCycling else { return }
         isCycling = false
         isCycleActiveForEventTap = false
@@ -511,7 +519,7 @@ final class GlobalShortcutMonitor: ObservableObject {
         return Array(ordered[currentIndex...]) + Array(ordered[..<currentIndex])
     }
 
-    fileprivate func finishCycle() {
+    func finishCycle() {
         guard isCycling else { return }
         isCycling = false
         isCycleActiveForEventTap = false
@@ -535,7 +543,7 @@ final class GlobalShortcutMonitor: ObservableObject {
         cycleWindows = []
         searchQuery = ""
         lastSearchShiftPress = nil
-        windowManager.activate(selectedWindow)
+        activate(selectedWindow)
     }
 
     private func tearDownEventTap() {

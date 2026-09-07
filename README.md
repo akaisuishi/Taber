@@ -104,6 +104,10 @@ Uma entrada antiga com ícone de Terminal pertence ao executável Swift Package 
 
 ## Desenvolvimento e validação
 
+Execute **zsh Scripts/test.sh** para rodar regressões, lógica e interface no
+Xcode. Use **--logic-only** para não automatizar a interface. Consulte a
+[matriz de cenários e limites de validação](Docs/TestMatrix.md).
+
 Build de verificação sem assinatura:
 
 ```bash

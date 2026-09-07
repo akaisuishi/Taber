@@ -7,7 +7,12 @@
          </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
-   <TestAction buildConfiguration="Debug" shouldUseLaunchSchemeArgsEnv="YES"/>
+   <TestAction buildConfiguration="Debug" shouldUseLaunchSchemeArgsEnv="YES">
+      <Testables>
+         <TestableReference skipped="NO"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="AA0000000000000000000106" BuildableName="TaberTests.xctest" BlueprintName="TaberTests" ReferencedContainer="container:Taber.xcodeproj"/></TestableReference>
+         <TestableReference skipped="NO"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="AA0000000000000000000206" BuildableName="TaberUITests.xctest" BlueprintName="TaberUITests" ReferencedContainer="container:Taber.xcodeproj"/></TestableReference>
+      </Testables>
+   </TestAction>
    <LaunchAction buildConfiguration="Debug" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" debugServiceExtension="internal" allowLocationSimulation="YES">
       <BuildableProductRunnable runnableDebuggingMode="0">
          <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="F00000000000000000000001" BuildableName="Taber.app" BlueprintName="Taber" ReferencedContainer="container:Taber.xcodeproj"/>

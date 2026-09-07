@@ -60,7 +60,7 @@ final class SwitcherViewModel: ObservableObject {
 
 @MainActor
 final class SwitcherPanelController {
-    private let model = SwitcherViewModel()
+    let model = SwitcherViewModel()
     private let panel: NSPanel
 
     init() {

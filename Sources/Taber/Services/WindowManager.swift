@@ -3,7 +3,7 @@ import AppKit
 import CoreGraphics
 import os
 
-private struct AccessibilityWindowSnapshot {
+struct AccessibilityWindowSnapshot {
     let windowID: CGWindowID?
     let identifier: String
     let title: String
@@ -16,8 +16,19 @@ private struct AccessibilityWindowSnapshot {
     let ordinal: Int
 }
 
+/// Injectable snapshots keep WindowServer/AX integration out of deterministic tests.
+@MainActor
+protocol WindowSnapshotSource {
+    var frontmostPID: pid_t? { get }
+    func candidates(includeUtilityWindows: Bool) -> [WindowInfo]
+    func accessibilityWindows(for pid: pid_t, includeUtilityWindows: Bool) -> [AccessibilityWindowSnapshot]
+    func spaces(for ids: [CGWindowID]) -> [CGWindowID: ResolvedWindowSpace]
+}
+
 @MainActor
 final class WindowManager {
+    private let source: (any WindowSnapshotSource)?
+    init(source: (any WindowSnapshotSource)? = nil) { self.source = source }
     private(set) var windows: [WindowInfo] = []
     private var applicationIconCache: [pid_t: NSImage] = [:]
     private var exactMatchesInRefresh = 0
@@ -25,6 +36,11 @@ final class WindowManager {
     private let logger = Logger(subsystem: "com.taber.app", category: "windows")
 
     func refresh(includeUtilityWindows: Bool = false) {
+        if let source {
+            windows = reconcile(source.candidates(includeUtilityWindows: includeUtilityWindows),
+                frontmostPID: source.frontmostPID, includeUtilityWindows: includeUtilityWindows)
+            return
+        }
         let refreshStartedAt = ContinuousClock.now
         exactMatchesInRefresh = 0
         if !didReportIdentityResolver {
@@ -106,6 +122,13 @@ final class WindowManager {
             )
         }
 
+        windows = reconcile(rawCandidates, frontmostPID: frontmostPID, includeUtilityWindows: includeUtilityWindows)
+        let elapsed = refreshStartedAt.duration(to: .now)
+        logger.notice("Varredura: janelas=\(self.windows.count) duração=\(String(describing: elapsed), privacy: .public)")
+        applicationIconCache = applicationIconCache.filter { activePIDs.contains($0.key) }
+    }
+
+    private func reconcile(_ rawCandidates: [WindowInfo], frontmostPID: pid_t?, includeUtilityWindows: Bool) -> [WindowInfo] {
         let candidatesByPID = Dictionary(grouping: rawCandidates, by: \.ownerPID)
         var canonicalWindowsByID: [CGWindowID: WindowInfo] = [:]
 
@@ -133,18 +156,12 @@ final class WindowManager {
         let canonicalWindows = rawCandidates.compactMap { canonicalWindowsByID[$0.id] }
         // Consultar o Space exige uma chamada ao WindowServer por janela.
         // Faça isso somente depois de remover superfícies auxiliares.
-        let resolvedSpaces = SpaceResolver.shared.resolve(windowIDs: canonicalWindows.map(\.id))
+        let resolvedSpaces = source?.spaces(for: canonicalWindows.map(\.id))
+            ?? SpaceResolver.shared.resolve(windowIDs: canonicalWindows.map(\.id))
         let resolvedWindows = canonicalWindows.map { window in
             window.withResolvedSpace(resolvedSpaces[window.id])
         }
-        windows = disambiguateRepeatedTitles(in: resolvedWindows)
-
-        let elapsed = refreshStartedAt.duration(to: .now)
-        logger.notice(
-            "Varredura concluída: candidatas=\(rawCandidates.count) janelas=\(self.windows.count) correspondênciasExatas=\(self.exactMatchesInRefresh) duração=\(String(describing: elapsed), privacy: .public)"
-        )
-
-        applicationIconCache = applicationIconCache.filter { activePIDs.contains($0.key) }
+        return disambiguateRepeatedTitles(in: resolvedWindows)
     }
 
     private func canonicalWindows(
@@ -328,6 +345,7 @@ final class WindowManager {
         for ownerPID: pid_t,
         includeUtilityWindows: Bool
     ) -> [AccessibilityWindowSnapshot] {
+        if let source { return source.accessibilityWindows(for: ownerPID, includeUtilityWindows: includeUtilityWindows) }
         let application = AXUIElementCreateApplication(ownerPID)
         AXUIElementSetMessagingTimeout(application, 0.20)
         let focusedWindow = elementAttribute(
@@ -635,7 +653,7 @@ final class WindowManager {
     }
 
     func frontmostWindow() -> WindowInfo? {
-        let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let frontmostPID = source.map { $0.frontmostPID } ?? NSWorkspace.shared.frontmostApplication?.processIdentifier
         let candidates = windows.map {
             (
                 ownerPID: $0.ownerPID,

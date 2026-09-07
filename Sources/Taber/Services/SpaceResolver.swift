@@ -17,7 +17,7 @@ final class SpaceResolver {
     private typealias CopyManagedSpacesFunction = @convention(c) (Int32) -> Unmanaged<CFArray>?
     private typealias CopySpacesForWindowsFunction = @convention(c) (Int32, Int32, CFArray) -> Unmanaged<CFArray>?
 
-    private struct ManagedSpace {
+    struct ManagedSpace {
         let number: Int?
         let isFullScreen: Bool
     }
@@ -57,7 +57,7 @@ final class SpaceResolver {
               let displays = managedArray as? [[String: Any]]
         else { return [:] }
 
-        let managedSpaces = managedSpaceMap(from: displays)
+        let managedSpaces = Self.managedSpaceMap(from: displays)
         guard !managedSpaces.isEmpty else { return [:] }
 
         var result: [CGWindowID: ResolvedWindowSpace] = [:]
@@ -84,7 +84,7 @@ final class SpaceResolver {
         return result
     }
 
-    private func managedSpaceMap(from displays: [[String: Any]]) -> [UInt64: ManagedSpace] {
+    static func managedSpaceMap(from displays: [[String: Any]]) -> [UInt64: ManagedSpace] {
         var result: [UInt64: ManagedSpace] = [:]
         var nextNumber = 1
 

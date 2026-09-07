@@ -32,6 +32,31 @@
 		B00000000000000000000017 /* WindowSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000018 /* WindowSearchService.swift */; };
 		B00000000000000000000018 /* AccessibilityWindowIdentityResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000019 /* AccessibilityWindowIdentityResolver.swift */; };
 		B00000000000000000000019 /* WindowMatchingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000001A /* WindowMatchingPolicy.swift */; };
+		AA0000000000000000000103 = {isa = PBXBuildFile; fileRef = AA0000000000000000000101; };
+		AA0000000000000000001000 = {isa = PBXBuildFile; fileRef = C00000000000000000000001; };
+		AA0000000000000000001001 = {isa = PBXBuildFile; fileRef = C00000000000000000000003; };
+		AA0000000000000000001002 = {isa = PBXBuildFile; fileRef = C00000000000000000000004; };
+		AA0000000000000000001003 = {isa = PBXBuildFile; fileRef = C00000000000000000000005; };
+		AA0000000000000000001004 = {isa = PBXBuildFile; fileRef = C00000000000000000000006; };
+		AA0000000000000000001005 = {isa = PBXBuildFile; fileRef = C00000000000000000000007; };
+		AA0000000000000000001006 = {isa = PBXBuildFile; fileRef = C00000000000000000000008; };
+		AA0000000000000000001007 = {isa = PBXBuildFile; fileRef = C00000000000000000000009; };
+		AA0000000000000000001008 = {isa = PBXBuildFile; fileRef = C0000000000000000000000A; };
+		AA0000000000000000001009 = {isa = PBXBuildFile; fileRef = C0000000000000000000000B; };
+		AA0000000000000000001010 = {isa = PBXBuildFile; fileRef = C0000000000000000000000C; };
+		AA0000000000000000001011 = {isa = PBXBuildFile; fileRef = C0000000000000000000000D; };
+		AA0000000000000000001012 = {isa = PBXBuildFile; fileRef = C0000000000000000000000E; };
+		AA0000000000000000001013 = {isa = PBXBuildFile; fileRef = C0000000000000000000000F; };
+		AA0000000000000000001014 = {isa = PBXBuildFile; fileRef = C00000000000000000000012; };
+		AA0000000000000000001015 = {isa = PBXBuildFile; fileRef = C00000000000000000000013; };
+		AA0000000000000000001016 = {isa = PBXBuildFile; fileRef = C00000000000000000000014; };
+		AA0000000000000000001017 = {isa = PBXBuildFile; fileRef = C00000000000000000000015; };
+		AA0000000000000000001018 = {isa = PBXBuildFile; fileRef = C00000000000000000000016; };
+		AA0000000000000000001019 = {isa = PBXBuildFile; fileRef = C00000000000000000000017; };
+		AA0000000000000000001020 = {isa = PBXBuildFile; fileRef = C00000000000000000000018; };
+		AA0000000000000000001021 = {isa = PBXBuildFile; fileRef = C00000000000000000000019; };
+		AA0000000000000000001022 = {isa = PBXBuildFile; fileRef = C0000000000000000000001A; };
+		AA0000000000000000000203 = {isa = PBXBuildFile; fileRef = AA0000000000000000000201; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -62,6 +87,10 @@
 		C00000000000000000000019 /* AccessibilityWindowIdentityResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityWindowIdentityResolver.swift; sourceTree = "<group>"; };
 		C0000000000000000000001A /* WindowMatchingPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowMatchingPolicy.swift; sourceTree = "<group>"; };
 		C000000000000000000000FF /* Taber.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Taber.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000000000000000000101 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Tests/TaberTests/WindowWorkflowTests.swift"; sourceTree = SOURCE_ROOT; };
+		AA0000000000000000000102 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = TaberTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000000000000000000201 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Tests/TaberUITests/TaberUITests.swift"; sourceTree = SOURCE_ROOT; };
+		AA0000000000000000000202 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = TaberUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -72,6 +101,8 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AA0000000000000000000105 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		AA0000000000000000000205 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -79,6 +110,8 @@
 			isa = PBXGroup;
 			children = (
 				D00000000000000000000002 /* Sources */,
+				AA0000000000000000000201,
+				AA0000000000000000000101,
 				D00000000000000000000007 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -151,6 +184,8 @@
 			isa = PBXGroup;
 			children = (
 				C000000000000000000000FF /* Taber.app */,
+				AA0000000000000000000202,
+				AA0000000000000000000102,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -184,7 +219,13 @@
 			productReference = C000000000000000000000FF /* Taber.app */;
 			productType = "com.apple.product-type.application";
 		};
+		AA0000000000000000000106 = {isa = PBXNativeTarget; buildConfigurationList = AA0000000000000000000107; buildPhases = (AA0000000000000000000104, AA0000000000000000000105,); buildRules = (); dependencies = (); name = TaberTests; productName = TaberTests; productReference = AA0000000000000000000102; productType = "com.apple.product-type.bundle.unit-test"; };
+		AA0000000000000000000206 = {isa = PBXNativeTarget; buildConfigurationList = AA0000000000000000000207; buildPhases = (AA0000000000000000000204, AA0000000000000000000205,); buildRules = (); dependencies = (AA0000000000000000000300,); name = TaberUITests; productName = TaberUITests; productReference = AA0000000000000000000202; productType = "com.apple.product-type.bundle.ui-testing"; };
 /* End PBXNativeTarget section */
+
+/* Begin PBXTargetDependency section */
+		AA0000000000000000000300 = {isa = PBXTargetDependency; target = F00000000000000000000001; };
+/* End PBXTargetDependency section */
 
 /* Begin PBXProject section */
 		A00000000000000000000001 /* Project object */ = {
@@ -213,6 +254,8 @@
 			projectRoot = "";
 			targets = (
 				F00000000000000000000001 /* Taber */,
+				AA0000000000000000000206,
+				AA0000000000000000000106,
 			);
 		};
 /* End PBXProject section */
@@ -260,6 +303,8 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AA0000000000000000000104 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (AA0000000000000000000103, AA0000000000000000001000, AA0000000000000000001001, AA0000000000000000001002, AA0000000000000000001003, AA0000000000000000001004, AA0000000000000000001005, AA0000000000000000001006, AA0000000000000000001007, AA0000000000000000001008, AA0000000000000000001009, AA0000000000000000001010, AA0000000000000000001011, AA0000000000000000001012, AA0000000000000000001013, AA0000000000000000001014, AA0000000000000000001015, AA0000000000000000001016, AA0000000000000000001017, AA0000000000000000001018, AA0000000000000000001019, AA0000000000000000001020, AA0000000000000000001021, AA0000000000000000001022,); runOnlyForDeploymentPostprocessing = 0; };
+		AA0000000000000000000204 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (AA0000000000000000000203,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
@@ -331,6 +376,10 @@
 			};
 			name = Release;
 		};
+		AA0000000000000000000108 = {isa = XCBuildConfiguration; buildSettings = { GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = "com.taber.TaberTests"; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 6.0; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; MACOSX_DEPLOYMENT_TARGET = 14.0; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = 7KG3BTVM9D; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@loader_path/../Frameworks", "@executable_path/../Frameworks",);  }; name = Debug; };
+		AA0000000000000000000109 = {isa = XCBuildConfiguration; buildSettings = { GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = "com.taber.TaberTests"; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 6.0; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; MACOSX_DEPLOYMENT_TARGET = 14.0; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = 7KG3BTVM9D; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@loader_path/../Frameworks", "@executable_path/../Frameworks",);  }; name = Release; };
+		AA0000000000000000000208 = {isa = XCBuildConfiguration; buildSettings = { GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = "com.taber.TaberUITests"; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 6.0; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; MACOSX_DEPLOYMENT_TARGET = 14.0; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = 7KG3BTVM9D; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@loader_path/../Frameworks", "@executable_path/../Frameworks",); TEST_TARGET_NAME = Taber; }; name = Debug; };
+		AA0000000000000000000209 = {isa = XCBuildConfiguration; buildSettings = { GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = "com.taber.TaberUITests"; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 6.0; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; MACOSX_DEPLOYMENT_TARGET = 14.0; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = 7KG3BTVM9D; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@loader_path/../Frameworks", "@executable_path/../Frameworks",); TEST_TARGET_NAME = Taber; }; name = Release; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -352,6 +401,8 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		AA0000000000000000000107 = {isa = XCConfigurationList; buildConfigurations = (AA0000000000000000000108, AA0000000000000000000109,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		AA0000000000000000000207 = {isa = XCConfigurationList; buildConfigurations = (AA0000000000000000000208, AA0000000000000000000209,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 /* End XCConfigurationList section */
 	};
 	rootObject = A00000000000000000000001 /* Project object */;

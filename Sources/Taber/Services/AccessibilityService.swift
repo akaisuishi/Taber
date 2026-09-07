@@ -1,22 +1,74 @@
 import AppKit
 @preconcurrency import ApplicationServices
 import CoreGraphics
-import os
+
+@MainActor
+protocol WindowActivationDriving {
+    func resolve(_ window: WindowInfo) -> Bool
+    func restore()
+    func focus()
+    func activateApplication()
+    var isMinimized: Bool { get }
+}
+
+@MainActor
+protocol ActivationClock {
+    func schedule(after delay: Duration, operation: @escaping @MainActor () -> Void)
+}
+
+@MainActor
+struct SystemActivationClock: ActivationClock {
+    func schedule(after delay: Duration, operation: @escaping @MainActor () -> Void) {
+        Task { @MainActor in
+            try? await Task.sleep(for: delay)
+            operation()
+        }
+    }
+}
+
+/// Same activation sequence for live AX operations and deterministic drivers.
+@MainActor
+final class WindowActivationCoordinator {
+    private let driver: (WindowInfo) -> any WindowActivationDriving
+    private let clock: any ActivationClock
+
+    init(clock: any ActivationClock = SystemActivationClock(),
+         driver: @escaping (WindowInfo) -> any WindowActivationDriving) {
+        self.clock = clock
+        self.driver = driver
+    }
+
+    func activate(_ window: WindowInfo) {
+        let target = driver(window)
+        if WindowMatchingPolicy.shouldActivateApplicationWithoutRestoring(
+            usesApplicationOnlyActivation: window.activationMode == .activateApplication,
+            isMinimized: window.isMinimized) {
+            target.activateApplication()
+            return
+        }
+        guard target.resolve(window) else {
+            target.activateApplication()
+            return
+        }
+        target.restore()
+        target.focus()
+        target.activateApplication()
+        target.restore()
+        target.focus()
+        if window.isMinimized {
+            clock.schedule(after: .milliseconds(100)) {
+                guard target.isMinimized else { return }
+                target.restore()
+                target.activateApplication()
+                target.focus()
+            }
+        }
+    }
+}
 
 @MainActor
 enum AccessibilityService {
-    private static let logger = Logger(subsystem: "com.taber.app", category: "accessibility")
-
-    private struct WindowCandidate {
-        let element: AXUIElement
-        let windowID: CGWindowID?
-        let identifier: String
-        let title: String
-        let bounds: CGRect?
-        let isMinimized: Bool
-        let ordinal: Int
-    }
-
+    private static let coordinator = WindowActivationCoordinator { AXWindowActivationDriver(window: $0) }
     static var isTrusted: Bool {
         AXIsProcessTrusted()
     }
@@ -38,176 +90,93 @@ enum AccessibilityService {
         NSWorkspace.shared.open(url)
     }
 
-    static func restoreAndRaise(window: WindowInfo) {
-        let runningApplication = NSRunningApplication(processIdentifier: window.ownerPID)
 
-        // Fullscreen de mídia em navegadores é apresentado por uma superfície
-        // separada que não pertence a kAXWindows. Levantar a janela AX normal
-        // encobre essa superfície; somente reativar o app preserva o vídeo.
-        if WindowMatchingPolicy.shouldActivateApplicationWithoutRestoring(
-            usesApplicationOnlyActivation: window.activationMode == .activateApplication,
-            isMinimized: window.isMinimized
-        ) {
-            runningApplication?.activate(options: [])
-            return
+    static func restoreAndRaise(window: WindowInfo) { coordinator.activate(window) }
+}
+
+struct ActivationCandidate {
+    let windowID: CGWindowID?
+    let identifier: String
+    let title: String
+    let bounds: CGRect?
+    let isMinimized: Bool
+    let ordinal: Int
+}
+
+extension WindowMatchingPolicy {
+    static func activationCandidateIndex(for window: WindowInfo, in candidates: [ActivationCandidate]) -> Int? {
+        if let exact = candidates.firstIndex(where: { $0.windowID == window.id }) { return exact }
+        if let unique = uniqueIdentifierIndex(targetIdentifier: window.accessibilityIdentifier,
+                                               candidateIdentifiers: candidates.map(\.identifier)) { return unique }
+        let scored = candidates.enumerated().compactMap { index, candidate -> (Int, Int)? in
+            guard let score = fallbackScore(candidateTitle: window.title, candidateBounds: window.bounds,
+                candidateIsMinimized: window.isMinimized, candidateOrdinal: window.accessibilityOrdinal ?? Int.max / 2,
+                accessibilityTitle: candidate.title, accessibilityBounds: candidate.bounds,
+                accessibilityIsMinimized: candidate.isMinimized, accessibilityOrdinal: candidate.ordinal) else { return nil }
+            return (index, score)
         }
+        return scored.max(by: { $0.1 < $1.1 })?.0
+    }
+}
 
-        let application = AXUIElementCreateApplication(window.ownerPID)
-        AXUIElementSetMessagingTimeout(application, 0.25)
-        var windowsValue: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &windowsValue)
+@MainActor
+private final class AXWindowActivationDriver: WindowActivationDriving {
+    private let application: AXUIElement
+    private let running: NSRunningApplication?
+    private var target: AXUIElement?
 
-        if result == .success, let windows = windowsValue as? [AXUIElement] {
-            // Resolva o alvo antes de ativar o aplicativo. A ativação pode
-            // reordenar kAXWindows e tornaria o ordinal menos confiável.
-            let matchingWindow = bestMatchingWindow(in: windows, for: window)
-
-            if let matchingWindow {
-                let minimized = false
-                let selected = true
-                let initialRestoreResult = AXUIElementSetAttributeValue(
-                    matchingWindow,
-                    kAXMinimizedAttribute as CFString,
-                    minimized as CFTypeRef
-                )
-                // Defina a janela-alvo no processo antes de ativá-lo. Chrome,
-                // Finder e outros apps com várias janelas podem restaurar a
-                // última janela ativa quando o processo é ativado primeiro.
-                // Reafirmar o foco após a ativação cobre implementações AX que
-                // só aceitam a alteração enquanto o aplicativo está ativo.
-                _ = AXUIElementSetAttributeValue(
-                    application,
-                    kAXFocusedWindowAttribute as CFString,
-                    matchingWindow
-                )
-                _ = AXUIElementSetAttributeValue(matchingWindow, kAXMainAttribute as CFString, selected as CFTypeRef)
-                _ = AXUIElementSetAttributeValue(matchingWindow, kAXFocusedAttribute as CFString, selected as CFTypeRef)
-                runningApplication?.activate(options: [])
-                // Alguns aplicativos só aceitam sair do Dock depois de terem
-                // sido ativados. Reaplique AXMinimized=false após a ativação.
-                let activatedRestoreResult = AXUIElementSetAttributeValue(
-                    matchingWindow,
-                    kAXMinimizedAttribute as CFString,
-                    minimized as CFTypeRef
-                )
-                _ = AXUIElementSetAttributeValue(
-                    application,
-                    kAXFocusedWindowAttribute as CFString,
-                    matchingWindow
-                )
-                _ = AXUIElementPerformAction(matchingWindow, kAXRaiseAction as CFString)
-                if window.isMinimized {
-                    logger.notice(
-                        "Restauração solicitada: pid=\(window.ownerPID) janela=\(window.id) inicial=\(initialRestoreResult.rawValue) apósAtivação=\(activatedRestoreResult.rawValue)"
-                    )
-                    scheduleRestoreVerification(
-                        application: application,
-                        matchingWindow: matchingWindow,
-                        runningApplication: runningApplication,
-                        windowID: window.id
-                    )
-                }
-                return
-            }
-        }
-
-        runningApplication?.activate(options: [])
+    init(window: WindowInfo) {
+        application = AXUIElementCreateApplication(window.ownerPID)
+        running = NSRunningApplication(processIdentifier: window.ownerPID)
+        AXUIElementSetMessagingTimeout(application, 0.20)
     }
 
-    private static func scheduleRestoreVerification(
-        application: AXUIElement,
-        matchingWindow: AXUIElement,
-        runningApplication: NSRunningApplication?,
-        windowID: CGWindowID
-    ) {
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(100))
-            guard boolAttribute(kAXMinimizedAttribute as CFString, from: matchingWindow) else {
-                return
-            }
-
-            let minimized = false
-            let selected = true
-            let retryResult = AXUIElementSetAttributeValue(
-                matchingWindow,
-                kAXMinimizedAttribute as CFString,
-                minimized as CFTypeRef
-            )
-            runningApplication?.activate(options: [])
-            _ = AXUIElementSetAttributeValue(
-                application,
-                kAXFocusedWindowAttribute as CFString,
-                matchingWindow
-            )
-            _ = AXUIElementSetAttributeValue(
-                matchingWindow,
-                kAXMainAttribute as CFString,
-                selected as CFTypeRef
-            )
-            _ = AXUIElementPerformAction(matchingWindow, kAXRaiseAction as CFString)
-            logger.notice(
-                "Restauração AX repetida: janela=\(windowID) resultado=\(retryResult.rawValue)"
-            )
-        }
-    }
-
-    private static func bestMatchingWindow(
-        in elements: [AXUIElement],
-        for window: WindowInfo
-    ) -> AXUIElement? {
+    func resolve(_ window: WindowInfo) -> Bool {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value) == .success,
+              let elements = value as? [AXUIElement] else { return false }
         let candidates = elements.enumerated().map { ordinal, element in
-            WindowCandidate(
-                element: element,
-                windowID: AccessibilityWindowIdentityResolver.windowID(for: element),
+            ActivationCandidate(windowID: AccessibilityWindowIdentityResolver.windowID(for: element),
                 identifier: stringAttribute(kAXIdentifierAttribute as CFString, from: element),
                 title: stringAttribute(kAXTitleAttribute as CFString, from: element),
-                bounds: bounds(of: element),
-                isMinimized: boolAttribute(kAXMinimizedAttribute as CFString, from: element),
-                ordinal: ordinal
-            )
+                bounds: bounds(of: element), isMinimized: boolAttribute(kAXMinimizedAttribute as CFString, from: element),
+                ordinal: ordinal)
         }
-
-        if let exactWindow = candidates.first(where: { $0.windowID == window.id }) {
-            return exactWindow.element
-        }
-
-        if let uniqueIdentifierIndex = WindowMatchingPolicy.uniqueIdentifierIndex(
-            targetIdentifier: window.accessibilityIdentifier,
-            candidateIdentifiers: candidates.map(\.identifier)
-        ) {
-            return candidates[uniqueIdentifierIndex].element
-        }
-
-        let scored = candidates.compactMap { candidate -> (WindowCandidate, Int)? in
-            guard let score = WindowMatchingPolicy.fallbackScore(
-                candidateTitle: window.title,
-                candidateBounds: window.bounds,
-                candidateIsMinimized: window.isMinimized,
-                candidateOrdinal: window.accessibilityOrdinal ?? Int.max / 2,
-                accessibilityTitle: candidate.title,
-                accessibilityBounds: candidate.bounds,
-                accessibilityIsMinimized: candidate.isMinimized,
-                accessibilityOrdinal: candidate.ordinal
-            ) else { return nil }
-            return (candidate, score)
-        }
-
-        return scored.max(by: { $0.1 < $1.1 })?.0.element
+        guard let index = WindowMatchingPolicy.activationCandidateIndex(for: window, in: candidates) else { return false }
+        target = elements[index]
+        return true
     }
 
-    private static func stringAttribute(_ attribute: CFString, from element: AXUIElement) -> String {
+    func restore() {
+        guard let target else { return }
+        _ = AXUIElementSetAttributeValue(target, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+    }
+
+    func focus() {
+        guard let target else { return }
+        _ = AXUIElementSetAttributeValue(application, kAXFocusedWindowAttribute as CFString, target)
+        _ = AXUIElementSetAttributeValue(target, kAXMainAttribute as CFString, kCFBooleanTrue)
+        _ = AXUIElementSetAttributeValue(target, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        _ = AXUIElementPerformAction(target, kAXRaiseAction as CFString)
+    }
+
+    func activateApplication() { running?.activate(options: []) }
+    var isMinimized: Bool {
+        target.map { boolAttribute(kAXMinimizedAttribute as CFString, from: $0) } ?? false
+    }
+    private func stringAttribute(_ attribute: CFString, from element: AXUIElement) -> String {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else { return "" }
         return value as? String ?? ""
     }
 
-    private static func boolAttribute(_ attribute: CFString, from element: AXUIElement) -> Bool {
+    private func boolAttribute(_ attribute: CFString, from element: AXUIElement) -> Bool {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else { return false }
         return (value as? NSNumber)?.boolValue ?? false
     }
 
-    private static func bounds(of element: AXUIElement) -> CGRect? {
+    private func bounds(of element: AXUIElement) -> CGRect? {
         var positionValue: CFTypeRef?
         var sizeValue: CFTypeRef?
         guard AXUIElementCopyAttributeValue(

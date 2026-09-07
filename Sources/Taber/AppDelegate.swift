@@ -2,7 +2,8 @@ import AppKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let settings = SettingsStore()
+    private let settings = SettingsStore(defaults: ProcessInfo.processInfo.arguments.contains("--ui-testing")
+        ? UserDefaults(suiteName: "com.taber.ui-testing")! : .standard)
     private let windowManager = WindowManager()
     private var statusBarController: StatusBarController!
     private var shortcutMonitor: GlobalShortcutMonitor!
@@ -11,6 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var previewHideWorkItem: DispatchWorkItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let isUITesting = ProcessInfo.processInfo.arguments.contains("--ui-testing")
+        if isUITesting { settings.shortcutEnabled = false }
         configureMainMenu()
         switcherPanelController = SwitcherPanelController()
         shortcutMonitor = GlobalShortcutMonitor(
@@ -24,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onOpenSettings: { [weak self] in self?.openSettings() },
             onQuit: { NSApp.terminate(nil) }
         )
-        shortcutMonitor.start()
+        if isUITesting { openSettings() } else { shortcutMonitor.start() }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
             guard let self, self.shortcutMonitor.state != .active else { return }
