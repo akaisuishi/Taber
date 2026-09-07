@@ -33,9 +33,14 @@ final class WindowManager {
     private var applicationIconCache: [pid_t: NSImage] = [:]
     private var exactMatchesInRefresh = 0
     private var didReportIdentityResolver = false
+    private var refreshDeadline = TimeInterval.greatestFiniteMagnitude
+    private var snapshotComplete = true
+    private var screens: [NSScreen] = []
     private let logger = Logger(subsystem: "com.taber.app", category: "windows")
 
     func refresh(includeUtilityWindows: Bool = false) {
+        screens = NSScreen.screens
+        refreshDeadline = ProcessInfo.processInfo.systemUptime + 0.32
         if let source {
             windows = reconcile(source.candidates(includeUtilityWindows: includeUtilityWindows),
                 frontmostPID: source.frontmostPID, includeUtilityWindows: includeUtilityWindows)
@@ -118,7 +123,8 @@ final class WindowManager {
                 isMinimized: false,
                 isFullScreen: isFullScreenWindow(bounds),
                 screenName: screenName(for: bounds),
-                icon: icon
+                icon: icon,
+                processLaunchDate: application.launchDate
             )
         }
 
@@ -132,7 +138,13 @@ final class WindowManager {
         let candidatesByPID = Dictionary(grouping: rawCandidates, by: \.ownerPID)
         var canonicalWindowsByID: [CGWindowID: WindowInfo] = [:]
 
-        for (ownerPID, applicationCandidates) in candidatesByPID {
+        let orderedPIDs = candidatesByPID.keys.sorted {
+            if $0 == frontmostPID { return true }
+            if $1 == frontmostPID { return false }
+            return $0 < $1
+        }
+        for ownerPID in orderedPIDs {
+            guard let applicationCandidates = candidatesByPID[ownerPID] else { continue }
             let selected = canonicalWindows(
                 from: applicationCandidates,
                 ownerPID: ownerPID,
@@ -153,7 +165,9 @@ final class WindowManager {
         // CGWindowListCopyWindowInfo já vem em ordem visual, da frente para
         // trás. Filtrar o array original preserva essa ordem depois da
         // reconciliação com as janelas reais da Acessibilidade.
+        let originalIDs = Set(rawCandidates.map(\.id))
         let canonicalWindows = rawCandidates.compactMap { canonicalWindowsByID[$0.id] }
+            + canonicalWindowsByID.values.filter { !originalIDs.contains($0.id) }.sorted { $0.id < $1.id }
         // Consultar o Space exige uma chamada ao WindowServer por janela.
         // Faça isso somente depois de remover superfícies auxiliares.
         let resolvedSpaces = source?.spaces(for: canonicalWindows.map(\.id))
@@ -210,7 +224,7 @@ final class WindowManager {
                let exactIndex = remaining.firstIndex(where: { $0.id == exactWindowID }) {
                 bestIndex = exactIndex
                 exactMatchesInRefresh += 1
-            } else {
+            } else if accessibilityWindow.windowID == nil {
                 let scored = remaining.enumerated().compactMap { index, candidate -> (Int, Int)? in
                     let visualOrder = visualOrderByID[candidate.id, default: index]
                     guard let score = matchScore(
@@ -220,9 +234,27 @@ final class WindowManager {
                     ) else { return nil }
                     return (index, score)
                 }
-                bestIndex = scored.max(by: { $0.1 < $1.1 })?.0
+                if let best = scored.max(by: { $0.1 < $1.1 }),
+                   scored.filter({ $0.1 == best.1 }).count == 1 { bestIndex = best.0 }
+                else { bestIndex = nil }
+            } else {
+                bestIndex = nil
             }
-            guard let bestIndex else { continue }
+            guard let bestIndex else {
+                // Minimized AX windows may temporarily disappear from CGWindowList.
+                if let id = accessibilityWindow.windowID, accessibilityWindow.isMinimized,
+                   let template = candidates.first {
+                    let recovered = WindowInfo(id: id, ownerPID: ownerPID,
+                        bundleIdentifier: template.bundleIdentifier, applicationName: template.applicationName,
+                        title: accessibilityWindow.title, bounds: accessibilityWindow.bounds,
+                        isOnScreen: false, isMinimized: true, icon: template.icon,
+                        accessibilityIdentifier: accessibilityWindow.identifier,
+                        accessibilityOrdinal: accessibilityWindow.ordinal,
+                        processLaunchDate: template.processLaunchDate)
+                    matched.append((recovered, accessibilityWindow))
+                }
+                continue
+            }
             let candidate = remaining.remove(at: bestIndex)
             let candidateActivationMode = activationMode(
                 for: candidate,
@@ -241,7 +273,7 @@ final class WindowManager {
                     isMinimized: accessibilityWindow.isMinimized,
                     isFullScreen: candidate.isFullScreen
                         || candidateActivationMode == .activateApplication,
-                    isFocused: accessibilityWindow.isFocused || accessibilityWindow.isMain,
+                    isFocused: accessibilityWindow.isFocused,
                     activationMode: candidateActivationMode
                 ),
                 accessibility: accessibilityWindow
@@ -276,7 +308,8 @@ final class WindowManager {
                 guard let hostIndex = WindowMatchingPolicy.preferredContentHostIndex(
                     presentationOrdinal: presentation.accessibility.ordinal,
                     presentationDocument: presentation.accessibility.document,
-                    candidates: hostCandidates
+                    candidates: hostCandidates,
+                    requireUniqueHost: true
                 ) else { continue }
 
                 let hostMatch = matched[hostIndex]
@@ -285,9 +318,9 @@ final class WindowManager {
                     identifier: host.identifier,
                     ordinal: host.ordinal,
                     accessibilityTitle: host.title,
-                    isMinimized: false,
+                    isMinimized: host.isMinimized,
                     isFullScreen: true,
-                    isFocused: host.isFocused || host.isMain,
+                    isFocused: host.isFocused || presentation.accessibility.isFocused,
                     activationMode: .activateApplication
                 )
                 hostIndicesToRemove.insert(presentationIndex)
@@ -306,25 +339,23 @@ final class WindowManager {
         // e criar outra superfície CG para o fullscreen do player. Ela sobra
         // após a reconciliação porque não existe em kAXWindows. Associe-a à
         // janela principal/focada e preserve seu ID para miniatura e Space.
-        if let presentationIndex = remaining.firstIndex(where: { candidate in
+        if candidates.first.map({ isBrowser($0.bundleIdentifier) }) == true,
+           let presentationIndex = remaining.firstIndex(where: { candidate in
             isDetachedFullScreenPresentation(
                 candidate,
                 accessibilityWindows: accessibilityWindows
             )
-        }), !matched.isEmpty {
+        }), let hostIndex = matched.firstIndex(where: { $0.accessibility.isFocused }) {
             remaining.remove(at: presentationIndex)
-            let hostIndex = matched.firstIndex {
-                $0.accessibility.isMain || $0.accessibility.isFocused
-            } ?? 0
             let hostMatch = matched[hostIndex]
             let host = hostMatch.accessibility
             matched[hostIndex].window = hostMatch.window.withAccessibilityIdentity(
                 identifier: host.identifier,
                 ordinal: host.ordinal,
                 accessibilityTitle: host.title,
-                isMinimized: false,
+                isMinimized: host.isMinimized,
                 isFullScreen: true,
-                isFocused: host.isFocused || host.isMain,
+                isFocused: host.isFocused,
                 activationMode: .activateApplication
             )
         }
@@ -335,7 +366,7 @@ final class WindowManager {
         // as identidades já resolvidas das outras janelas do aplicativo.
         guard !matched.isEmpty else { return deduplicateByGeometry(candidates) }
         let matchedWindows = matched.map(\.window)
-        if matchedAccessibilityWindowCount == accessibilityWindows.count {
+        if matchedAccessibilityWindowCount == accessibilityWindows.count && snapshotComplete {
             return matchedWindows
         }
         return matchedWindows + deduplicateByGeometry(credibleFallbackCandidates(remaining))
@@ -345,58 +376,50 @@ final class WindowManager {
         for ownerPID: pid_t,
         includeUtilityWindows: Bool
     ) -> [AccessibilityWindowSnapshot] {
+        snapshotComplete = true
         if let source { return source.accessibilityWindows(for: ownerPID, includeUtilityWindows: includeUtilityWindows) }
+        let deadline = min(refreshDeadline, ProcessInfo.processInfo.systemUptime + 0.12)
+        guard ProcessInfo.processInfo.systemUptime < deadline else { snapshotComplete = false; return [] }
         let application = AXUIElementCreateApplication(ownerPID)
-        AXUIElementSetMessagingTimeout(application, 0.20)
-        let focusedWindow = elementAttribute(
-            kAXFocusedWindowAttribute as CFString,
-            from: application
-        )
-        let mainWindow = elementAttribute(
-            kAXMainWindowAttribute as CFString,
-            from: application
-        )
-
-        var windowsValue: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-            application,
-            kAXWindowsAttribute as CFString,
-            &windowsValue
-        ) == .success,
-        let elements = windowsValue as? [AXUIElement]
-        else { return [] }
-
-        return elements.enumerated().compactMap { ordinal, element in
-            let subrole = stringAttribute(kAXSubroleAttribute as CFString, from: element)
-            let isStandard = subrole.isEmpty
-                || subrole == kAXStandardWindowSubrole as String
-                || subrole == kAXDialogSubrole as String
-            let isAllowedUtility = includeUtilityWindows
-                && (subrole == kAXFloatingWindowSubrole as String
-                    || subrole == kAXSystemFloatingWindowSubrole as String)
-            guard isStandard || isAllowedUtility,
-                  let bounds = bounds(of: element)
-            else { return nil }
-
-            let windowID = AccessibilityWindowIdentityResolver.windowID(for: element)
-            let isFocused = boolAttribute(kAXFocusedAttribute as CFString, from: element)
-                || focusedWindow.map { CFEqual(element, $0) } == true
-            let isMain = boolAttribute(kAXMainAttribute as CFString, from: element)
-                || mainWindow.map { CFEqual(element, $0) } == true
-
-            return AccessibilityWindowSnapshot(
-                windowID: windowID,
-                identifier: stringAttribute(kAXIdentifierAttribute as CFString, from: element),
-                title: stringAttribute(kAXTitleAttribute as CFString, from: element),
-                document: stringAttribute(kAXDocumentAttribute as CFString, from: element),
-                subrole: subrole,
-                bounds: bounds,
-                isMinimized: boolAttribute(kAXMinimizedAttribute as CFString, from: element),
-                isMain: isMain,
-                isFocused: isFocused,
-                ordinal: ordinal
-            )
+        AXUIElementSetMessagingTimeout(application, 0.04)
+        let focusedWindow = elementAttribute(kAXFocusedWindowAttribute as CFString, from: application)
+        let mainWindow = elementAttribute(kAXMainWindowAttribute as CFString, from: application)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value) == .success,
+              let elements = value as? [AXUIElement] else { snapshotComplete = false; return [] }
+        let attributes = [kAXSubroleAttribute, kAXTitleAttribute, kAXDocumentAttribute, kAXIdentifierAttribute,
+                          kAXPositionAttribute, kAXSizeAttribute, kAXMinimizedAttribute,
+                          kAXFocusedAttribute, kAXMainAttribute] as CFArray
+        var snapshots: [AccessibilityWindowSnapshot] = []
+        for (ordinal, element) in elements.enumerated() {
+            guard ProcessInfo.processInfo.systemUptime < deadline, ordinal < 512 else {
+                snapshotComplete = false; break
+            }
+            AXUIElementSetMessagingTimeout(element, 0.04)
+            var values: CFArray?
+            guard AXUIElementCopyMultipleAttributeValues(element, attributes, [], &values) == .success,
+                  let fields = values as? [Any], fields.count == 9 else { snapshotComplete = false; continue }
+            let subrole = fields[0] as? String ?? ""
+            let standard = subrole.isEmpty || subrole == kAXStandardWindowSubrole || subrole == kAXDialogSubrole
+            let utility = includeUtilityWindows && (subrole == kAXFloatingWindowSubrole || subrole == kAXSystemFloatingWindowSubrole)
+            guard standard || utility else { continue }
+            guard CFGetTypeID(fields[4] as CFTypeRef) == AXValueGetTypeID(),
+                  CFGetTypeID(fields[5] as CFTypeRef) == AXValueGetTypeID() else { continue }
+            var position = CGPoint.zero
+            var size = CGSize.zero
+            guard AXValueGetValue(fields[4] as! AXValue, .cgPoint, &position),
+                  AXValueGetValue(fields[5] as! AXValue, .cgSize, &size) else { continue }
+            snapshots.append(AccessibilityWindowSnapshot(
+                windowID: AccessibilityWindowIdentityResolver.windowID(for: element),
+                identifier: fields[3] as? String ?? "", title: fields[1] as? String ?? "",
+                document: fields[2] as? String ?? "", subrole: subrole,
+                bounds: CGRect(origin: position, size: size),
+                isMinimized: (fields[6] as? NSNumber)?.boolValue ?? false,
+                isMain: ((fields[8] as? NSNumber)?.boolValue ?? false) || mainWindow.map { CFEqual(element, $0) } == true,
+                isFocused: ((fields[7] as? NSNumber)?.boolValue ?? false) || focusedWindow.map { CFEqual(element, $0) } == true,
+                ordinal: ordinal))
         }
+        return snapshots
     }
 
     private func activationMode(
@@ -443,7 +466,7 @@ final class WindowManager {
 
     private func fillsVisibleScreen(_ windowBounds: CGRect) -> Bool {
         let cocoaBounds = cocoaScreenCoordinates(for: windowBounds)
-        return NSScreen.screens.contains { screen in
+        return screens.contains { screen in
             approximatelyEqual(cocoaBounds, screen.visibleFrame, tolerance: 16)
                 || approximatelyEqual(cocoaBounds, screen.frame, tolerance: 16)
         }
@@ -451,7 +474,7 @@ final class WindowManager {
 
     private func coversMostOfScreen(_ windowBounds: CGRect) -> Bool {
         let cocoaBounds = cocoaScreenCoordinates(for: windowBounds)
-        return NSScreen.screens.contains { screen in
+        return screens.contains { screen in
             let intersection = cocoaBounds.intersection(screen.frame)
             guard !intersection.isNull, screen.frame.width > 0, screen.frame.height > 0 else {
                 return false
@@ -471,11 +494,11 @@ final class WindowManager {
             candidateTitle: candidate.title,
             candidateBounds: candidate.bounds,
             candidateIsMinimized: candidate.isMinimized,
-            candidateOrdinal: candidateVisualOrder,
+            candidateOrdinal: 0,
             accessibilityTitle: accessibilityWindow.title,
             accessibilityBounds: accessibilityWindow.bounds,
             accessibilityIsMinimized: accessibilityWindow.isMinimized,
-            accessibilityOrdinal: accessibilityWindow.ordinal
+            accessibilityOrdinal: 0
         )
     }
 
@@ -499,29 +522,9 @@ final class WindowManager {
     }
 
     private func deduplicateByGeometry(_ candidates: [WindowInfo]) -> [WindowInfo] {
-        var result: [WindowInfo] = []
-
-        for candidate in candidates {
-            guard let duplicateIndex = result.firstIndex(where: { existing in
-                guard approximatelyEqual(existing.bounds, candidate.bounds) else { return false }
-                let existingTitle = normalized(existing.title)
-                let candidateTitle = normalized(candidate.title)
-                return existingTitle == candidateTitle
-                    || existingTitle.isEmpty
-                    || candidateTitle.isEmpty
-            }) else {
-                result.append(candidate)
-                continue
-            }
-
-            let existing = result[duplicateIndex]
-            if normalized(existing.title).isEmpty && !normalized(candidate.title).isEmpty {
-                result[duplicateIndex] = candidate
-            } else if existing.isMinimized && !candidate.isMinimized {
-                result[duplicateIndex] = candidate
-            }
-        }
-        return result
+        // Geometry and title are not identities (Finder, private browsing).
+        var seen = Set<CGWindowID>()
+        return candidates.filter { seen.insert($0.id).inserted }
     }
 
     private func credibleFallbackCandidates(_ candidates: [WindowInfo]) -> [WindowInfo] {
@@ -588,7 +591,6 @@ final class WindowManager {
     }
 
     private func screenName(for windowBounds: CGRect) -> String {
-        let screens = NSScreen.screens
         guard screens.count > 1 else { return "" }
         let cocoaBounds = cocoaScreenCoordinates(for: windowBounds)
         return screens.max { lhs, rhs in
@@ -598,13 +600,13 @@ final class WindowManager {
 
     private func isFullScreenWindow(_ windowBounds: CGRect) -> Bool {
         let cocoaBounds = cocoaScreenCoordinates(for: windowBounds)
-        return NSScreen.screens.contains { screen in
+        return screens.contains { screen in
             approximatelyEqual(cocoaBounds, screen.frame, tolerance: 12)
         }
     }
 
     private func cocoaScreenCoordinates(for cgBounds: CGRect) -> CGRect {
-        let mainScreenTop = NSScreen.screens.first?.frame.maxY ?? 0
+        let mainScreenTop = screens.first?.frame.maxY ?? 0
         return CGRect(
             x: cgBounds.minX,
             y: mainScreenTop - cgBounds.maxY,

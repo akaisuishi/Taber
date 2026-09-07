@@ -62,6 +62,7 @@ final class SwitcherViewModel: ObservableObject {
 final class SwitcherPanelController {
     let model = SwitcherViewModel()
     private let panel: NSPanel
+    private var screenObserver: NSObjectProtocol?
 
     init() {
         let hostingController = NSHostingController(rootView: SwitcherView(model: model))
@@ -79,6 +80,15 @@ final class SwitcherPanelController {
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.contentViewController = hostingController
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.panel.isVisible else { return }
+                self.resizeAndCenter(for: self.model.style, windows: self.model.windows,
+                                     size: self.model.size, isSearching: self.model.isSearching)
+            }
+        }
     }
 
     func show(
@@ -161,6 +171,10 @@ final class SwitcherPanelController {
         panel.orderOut(nil)
     }
 
+    func hideDemo() {
+        if model.isDemo { hide() }
+    }
+
     private func resizeAndCenter(
         for style: SwitcherStyle,
         windows: [WindowInfo],
@@ -179,15 +193,19 @@ final class SwitcherPanelController {
             NSMouseInRect(NSEvent.mouseLocation, $0.frame, false)
         } ?? NSScreen.main
         let visibleFrame = targetScreen?.visibleFrame ?? NSRect(origin: .zero, size: requestedSize)
+        panel.setFrame(Self.fittedFrame(requested: requestedSize, visibleFrame: visibleFrame), display: true)
+    }
+
+    static func fittedFrame(requested: NSSize, visibleFrame: NSRect) -> NSRect {
         let fittedSize = NSSize(
-            width: min(requestedSize.width, visibleFrame.width - 48),
-            height: min(requestedSize.height, visibleFrame.height - 48)
+            width: max(1, min(requested.width, visibleFrame.width - min(48, visibleFrame.width / 4))),
+            height: max(1, min(requested.height, visibleFrame.height - min(48, visibleFrame.height / 4)))
         )
         let origin = NSPoint(
             x: visibleFrame.midX - fittedSize.width / 2,
             y: visibleFrame.midY - fittedSize.height / 2
         )
-        panel.setFrame(NSRect(origin: origin, size: fittedSize), display: true)
+        return NSRect(origin: origin, size: fittedSize)
     }
 
     static func requestedSize(

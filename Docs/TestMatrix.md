@@ -76,3 +76,17 @@ Pendente no marco de testes. Chrome, Safari, Finder e TextEdit serão exercitado
 somente com janelas descartáveis. Fullscreen protegido, monitores separados,
 VM configurada e sessão remota autenticada não serão presumidos disponíveis.
 Ausência dessas dependências será explicitada no relatório final.
+
+## Resultado após correções
+
+As cinco falhas esperadas foram removidas e agora passam. A suíte reproduzível
+tem 39 aprovações, incluindo S34–S38 para minimização sem superfície CG,
+ambiguidade, ausência de janela atual, host fechado e cancelamento de restauração.
+S18 agora cobre múltiplos Spaces e todos os Desktops; S20 valida reposicionamento
+em retângulos de telas; S32 verifica limite e descarte por geração de capturas.
+Essas ampliações continuam sendo automatizadas com fixtures.
+
+O [relatório final](Release-1.1.0.md) registra medições, instalação e limites de
+validação ao vivo. A sonda real do Chrome apresentou timeout sem ciclo HID
+registrado e **não foi aprovada**. Ela é separada da suíte reproduzível e pode
+ser acionada com --live-hid. Não atribuímos aprovação ponta a ponta às simulações.

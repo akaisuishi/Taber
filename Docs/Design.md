@@ -20,8 +20,9 @@ abre um painel rápido e o direito preserva um menu nativo.
 ## Evidências visuais
 
 `zsh Scripts/render-visuals.sh /tmp/taber-visuals` renderiza fixtures locais:
-123 imagens incluindo os quatro visuais, três temas, três tamanhos, 1/3/12
-janelas, títulos longos, quatro seções das configurações e painel rápido.
+147 imagens incluindo os quatro visuais, três temas, três tamanhos, 1/3/12
+janelas, títulos longos, quatro seções das configurações, painel rápido,
+buscas vazias e área pequena de 640 × 360 pontos.
 Foram inspecionadas amostras dos quatro visuais, janela única, títulos longos,
 configurações e painel rápido. Renderização não equivale a teste ponta a ponta.
 As imagens do README contêm exclusivamente conteúdo fictício, sem capturas de

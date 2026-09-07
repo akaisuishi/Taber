@@ -34,6 +34,8 @@ xcodebuild \
   -configuration Release \
   -derivedDataPath "$derivedDataPath" \
   CODE_SIGNING_ALLOWED=NO \
+  ARCHS="arm64 x86_64" \
+  ONLY_ACTIVE_ARCH=NO \
   -quiet \
   build
 
@@ -41,6 +43,7 @@ mkdir -p "$projectRoot/Build"
 xattr -cr "$builtAppPath"
 codesign --force --deep --sign "$signingIdentity" --identifier com.taber.app "$builtAppPath" >/dev/null
 codesign --verify --deep --strict "$builtAppPath"
+lipo "$builtAppPath/Contents/MacOS/Taber" -verify_arch arm64 x86_64
 
 # Um .app armazenado diretamente no iCloud Drive recebe atributos FileProvider
 # que invalidam a verificação estrita do codesign. O produto distribuível fica

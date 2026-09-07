@@ -33,6 +33,7 @@ enum WindowActivationMode {
 struct WindowInfo: Identifiable, Hashable {
     let id: CGWindowID
     let ownerPID: pid_t
+    let processLaunchDate: Date?
     let bundleIdentifier: String
     let applicationName: String
     let title: String
@@ -43,6 +44,8 @@ struct WindowInfo: Identifiable, Hashable {
     let activationMode: WindowActivationMode
     let spaceIdentifier: UInt64?
     let spaceNumber: Int?
+    let spaceLocations: [SpaceLocation]
+    let isOnAllDesktops: Bool
     let screenName: String
     let icon: NSImage?
     let accessibilityIdentifier: String
@@ -70,10 +73,14 @@ struct WindowInfo: Identifiable, Hashable {
         accessibilityOrdinal: Int? = nil,
         isAccessibilityFocused: Bool = false,
         titleOccurrence: Int? = nil,
-        titleOccurrenceCount: Int = 1
+        titleOccurrenceCount: Int = 1,
+        processLaunchDate: Date? = nil,
+        spaceLocations: [SpaceLocation] = [],
+        isOnAllDesktops: Bool = false
     ) {
         self.id = id
         self.ownerPID = ownerPID
+        self.processLaunchDate = processLaunchDate
         self.bundleIdentifier = bundleIdentifier
         self.applicationName = applicationName
         self.title = title
@@ -84,6 +91,8 @@ struct WindowInfo: Identifiable, Hashable {
         self.activationMode = activationMode
         self.spaceIdentifier = spaceIdentifier
         self.spaceNumber = spaceNumber
+        self.spaceLocations = spaceLocations
+        self.isOnAllDesktops = isOnAllDesktops
         self.screenName = screenName
         self.icon = icon
         self.accessibilityIdentifier = accessibilityIdentifier
@@ -109,6 +118,11 @@ struct WindowInfo: Identifiable, Hashable {
     }
 
     var spaceLabel: String {
+        if isOnAllDesktops { return isMinimized ? "Todos os Desktops · Minimizada" : "Todos os Desktops" }
+        if spaceLocations.count > 1 {
+            let numbers = spaceLocations.compactMap(\.number).map(String.init).joined(separator: ", ")
+            return numbers.isEmpty ? "Múltiplos Spaces" : "Spaces \(numbers)" + (isMinimized ? " · Minimizada" : "")
+        }
         guard let spaceNumber else { return spaceState.title }
         return switch spaceState {
         case .current, .another: "Space \(spaceNumber)"
@@ -156,7 +170,10 @@ struct WindowInfo: Identifiable, Hashable {
             accessibilityOrdinal: ordinal,
             isAccessibilityFocused: isFocused,
             titleOccurrence: titleOccurrence,
-            titleOccurrenceCount: titleOccurrenceCount
+            titleOccurrenceCount: titleOccurrenceCount,
+            processLaunchDate: processLaunchDate,
+            spaceLocations: spaceLocations,
+            isOnAllDesktops: isOnAllDesktops
         )
     }
 
@@ -180,7 +197,10 @@ struct WindowInfo: Identifiable, Hashable {
             accessibilityOrdinal: accessibilityOrdinal,
             isAccessibilityFocused: isAccessibilityFocused,
             titleOccurrence: occurrence,
-            titleOccurrenceCount: count
+            titleOccurrenceCount: count,
+            processLaunchDate: processLaunchDate,
+            spaceLocations: spaceLocations,
+            isOnAllDesktops: isOnAllDesktops
         )
     }
 
@@ -204,15 +224,20 @@ struct WindowInfo: Identifiable, Hashable {
             accessibilityOrdinal: accessibilityOrdinal,
             isAccessibilityFocused: isAccessibilityFocused,
             titleOccurrence: titleOccurrence,
-            titleOccurrenceCount: titleOccurrenceCount
+            titleOccurrenceCount: titleOccurrenceCount,
+            processLaunchDate: processLaunchDate,
+            spaceLocations: resolvedSpace?.locations ?? [],
+            isOnAllDesktops: resolvedSpace?.isOnAllDesktops ?? false
         )
     }
 
     static func == (lhs: WindowInfo, rhs: WindowInfo) -> Bool {
-        lhs.id == rhs.id
+        lhs.id == rhs.id && lhs.ownerPID == rhs.ownerPID && lhs.processLaunchDate == rhs.processLaunchDate
     }
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
+        hasher.combine(ownerPID)
+        hasher.combine(processLaunchDate)
     }
 }

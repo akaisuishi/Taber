@@ -58,13 +58,13 @@ private func taberEventTapCallback(
     let monitor = Unmanaged<GlobalShortcutMonitor>.fromOpaque(userInfo).takeUnretainedValue()
 
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-        Task { @MainActor in monitor.reenableEventTap() }
+        DispatchQueue.main.async { monitor.reenableEventTap() }
         return Unmanaged.passUnretained(event)
     }
 
     if (type == .leftMouseDown || type == .rightMouseDown),
        monitor.isSearchDetachedForEventTap {
-        Task { @MainActor in monitor.cancelCycle() }
+        DispatchQueue.main.async { monitor.cancelCycle() }
         return Unmanaged.passUnretained(event)
     }
 
@@ -73,7 +73,7 @@ private func taberEventTapCallback(
 
     if type == .keyDown, commandPressed, keyCode == tabKeyCode {
         let reverse = event.flags.contains(.maskShift)
-        Task { @MainActor in monitor.beginOrAdvanceCycle(reverse: reverse) }
+        DispatchQueue.main.async { monitor.beginOrAdvanceCycle(reverse: reverse) }
         return nil
     }
 
@@ -81,7 +81,7 @@ private func taberEventTapCallback(
        keyCode == escapeKeyCode,
        (commandPressed || monitor.isSearchActiveForEventTap),
        monitor.isCycleActiveForEventTap {
-        Task { @MainActor in monitor.handleEscape() }
+        DispatchQueue.main.async { monitor.handleEscape() }
         return nil
     }
 
@@ -92,7 +92,7 @@ private func taberEventTapCallback(
        monitor.isCycleActiveForEventTap,
        !monitor.isSearchActiveForEventTap,
        monitor.searchShortcutForEventTap == .doubleShift {
-        Task { @MainActor in monitor.handleSearchShiftPress() }
+        DispatchQueue.main.async { monitor.handleSearchShiftPress() }
     }
 
     if commandPressed,
@@ -100,7 +100,7 @@ private func taberEventTapCallback(
        !monitor.isSearchActiveForEventTap,
        monitor.searchShortcutForEventTap.keyCode == keyCode {
         if type == .keyDown {
-            Task { @MainActor in monitor.enterSearch() }
+            DispatchQueue.main.async { monitor.enterSearch() }
         }
         return nil
     }
@@ -109,7 +109,7 @@ private func taberEventTapCallback(
        directionalKeyCodes.contains(keyCode),
        monitor.isCycleActiveForEventTap {
         if type == .keyDown {
-            Task { @MainActor in monitor.navigate(using: keyCode) }
+            DispatchQueue.main.async { monitor.navigate(using: keyCode) }
         }
         // Enquanto o alternador estiver aberto, nenhuma seta deve escapar
         // para o aplicativo abaixo e acionar Command + seta por acidente.
@@ -122,7 +122,7 @@ private func taberEventTapCallback(
        (type == .keyDown || type == .keyUp) {
         if type == .keyDown {
             let reverse = event.flags.contains(.maskShift)
-            Task { @MainActor in monitor.moveSearchSelection(reverse: reverse) }
+            DispatchQueue.main.async { monitor.moveSearchSelection(reverse: reverse) }
         }
         return nil
     }
@@ -131,7 +131,7 @@ private func taberEventTapCallback(
        (type == .keyDown || type == .keyUp) {
         if type == .keyDown {
             let text = keyboardText(from: event)
-            Task { @MainActor in
+            DispatchQueue.main.async {
                 monitor.handleSearchInput(keyCode: keyCode, text: text)
             }
         }
@@ -143,11 +143,11 @@ private func taberEventTapCallback(
     }
 
     if type == .flagsChanged, !commandPressed {
-        if monitor.isSearchActiveForEventTap,
-           monitor.keepSearchOpenForEventTap {
-            Task { @MainActor in monitor.detachSearchFromCommand() }
-        } else {
-            Task { @MainActor in monitor.finishCycle() }
+        // FIFO delivery: decide after preceding search/navigation events.
+        DispatchQueue.main.async {
+            if monitor.isSearchActiveForEventTap, monitor.keepSearchOpenForEventTap {
+                monitor.detachSearchFromCommand()
+            } else { monitor.finishCycle() }
         }
     }
 
@@ -323,14 +323,16 @@ final class GlobalShortcutMonitor: ObservableObject {
         guard settings.shortcutEnabled, state == .active else { return }
 
         if !isCycling {
+            AccessibilityService.cancelPendingRestoration()
             windowManager.refresh(includeUtilityWindows: settings.includeUtilityWindows)
-            allCycleWindows = orderedWindows(startingAt: windowManager.frontmostWindow())
+            let current = windowManager.frontmostWindow()
+            allCycleWindows = orderedWindows(startingAt: current)
             cycleWindows = allCycleWindows
             guard !cycleWindows.isEmpty else { return }
 
             searchQuery = ""
             lastSearchShiftPress = nil
-            selectedIndex = cycleWindows.count > 1 ? (reverse ? cycleWindows.count - 1 : 1) : 0
+            selectedIndex = reverse ? cycleWindows.count - 1 : (current != nil && cycleWindows.count > 1 ? 1 : 0)
             isCycling = true
             isCycleActiveForEventTap = true
             isSearchActiveForEventTap = false

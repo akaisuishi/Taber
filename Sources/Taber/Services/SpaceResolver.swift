@@ -7,6 +7,15 @@ struct ResolvedWindowSpace {
     let identifier: UInt64
     let number: Int?
     let isFullScreen: Bool
+    var locations: [SpaceLocation] = []
+    var isOnAllDesktops = false
+}
+
+struct SpaceLocation: Hashable {
+    let identifier: UInt64
+    let number: Int?
+    let isFullScreen: Bool
+    let displayIdentifier: String
 }
 
 @MainActor
@@ -20,6 +29,7 @@ final class SpaceResolver {
     struct ManagedSpace {
         let number: Int?
         let isFullScreen: Bool
+        let displayIdentifier: String
     }
 
     private let connection: Int32?
@@ -69,19 +79,26 @@ final class SpaceResolver {
                 identifiers
             )?.takeRetainedValue(),
             let spaceIDs = spacesArray as? [NSNumber],
-            let match = spaceIDs.lazy.compactMap({ identifier -> ResolvedWindowSpace? in
-                let value = identifier.uint64Value
-                guard let managed = managedSpaces[value] else { return nil }
-                return ResolvedWindowSpace(
-                    identifier: value,
-                    number: managed.number,
-                    isFullScreen: managed.isFullScreen
-                )
-            }).first
+            let match = Self.resolveMembership(spaceIDs.map(\.uint64Value), managed: managedSpaces)
             else { continue }
             result[windowID] = match
         }
         return result
+    }
+
+    static func resolveMembership(_ ids: [UInt64], managed: [UInt64: ManagedSpace]) -> ResolvedWindowSpace? {
+        let locations = Set(ids).compactMap { id -> SpaceLocation? in
+            guard let space = managed[id] else { return nil }
+            return SpaceLocation(identifier: id, number: space.number,
+                                 isFullScreen: space.isFullScreen, displayIdentifier: space.displayIdentifier)
+        }.sorted { ($0.number ?? Int.max, $0.identifier) < ($1.number ?? Int.max, $1.identifier) }
+        guard let first = locations.first else { return nil }
+        let desktops = Set(managed.filter { !$0.value.isFullScreen }.keys)
+        let allDesktops = desktops.count > 1 && desktops.isSubset(of: Set(ids))
+        return ResolvedWindowSpace(identifier: first.identifier,
+            number: locations.count == 1 ? first.number : nil,
+            isFullScreen: locations.allSatisfy(\.isFullScreen),
+            locations: locations, isOnAllDesktops: allDesktops)
     }
 
     static func managedSpaceMap(from displays: [[String: Any]]) -> [UInt64: ManagedSpace] {
@@ -104,7 +121,8 @@ final class SpaceResolver {
                 }
                 result[identifier.uint64Value] = ManagedSpace(
                     number: number,
-                    isFullScreen: type != 0
+                    isFullScreen: type != 0,
+                    displayIdentifier: display["Display Identifier"] as? String ?? ""
                 )
             }
         }

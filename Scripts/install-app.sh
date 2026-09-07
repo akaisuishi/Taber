@@ -28,6 +28,9 @@ EOF
 fi
 
 pkill -x Taber 2>/dev/null || true
+if [[ -d "$destinationAppPath" ]]; then
+  ditto -c -k --norsrc --keepParent "$destinationAppPath" "$projectRoot/Build/Taber-previous.zip"
+fi
 rm -rf "$destinationAppPath"
 ditto --noextattr --noqtn "$sourceAppPath" "$destinationAppPath"
 xattr -cr "$destinationAppPath"

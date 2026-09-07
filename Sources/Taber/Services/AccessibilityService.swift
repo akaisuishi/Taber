@@ -29,6 +29,7 @@ struct SystemActivationClock: ActivationClock {
 /// Same activation sequence for live AX operations and deterministic drivers.
 @MainActor
 final class WindowActivationCoordinator {
+    private var generation: UInt = 0
     private let driver: (WindowInfo) -> any WindowActivationDriving
     private let clock: any ActivationClock
 
@@ -39,14 +40,15 @@ final class WindowActivationCoordinator {
     }
 
     func activate(_ window: WindowInfo) {
+        cancelPending()
+        let request = generation
         let target = driver(window)
+        // Resolve even presentation hosts: a closed/restarted app must not
+        // reactivate whichever unrelated window happens to remain.
+        guard target.resolve(window) else { return }
         if WindowMatchingPolicy.shouldActivateApplicationWithoutRestoring(
             usesApplicationOnlyActivation: window.activationMode == .activateApplication,
             isMinimized: window.isMinimized) {
-            target.activateApplication()
-            return
-        }
-        guard target.resolve(window) else {
             target.activateApplication()
             return
         }
@@ -56,14 +58,17 @@ final class WindowActivationCoordinator {
         target.restore()
         target.focus()
         if window.isMinimized {
-            clock.schedule(after: .milliseconds(100)) {
-                guard target.isMinimized else { return }
+            clock.schedule(after: .milliseconds(100)) { [weak self] in
+                guard self?.generation == request,
+                      target.resolve(window), target.isMinimized else { return }
                 target.restore()
                 target.activateApplication()
                 target.focus()
             }
         }
     }
+
+    func cancelPending() { generation &+= 1 }
 }
 
 @MainActor
@@ -92,6 +97,7 @@ enum AccessibilityService {
 
 
     static func restoreAndRaise(window: WindowInfo) { coordinator.activate(window) }
+    static func cancelPendingRestoration() { coordinator.cancelPending() }
 }
 
 struct ActivationCandidate {
@@ -107,15 +113,20 @@ extension WindowMatchingPolicy {
     static func activationCandidateIndex(for window: WindowInfo, in candidates: [ActivationCandidate]) -> Int? {
         if let exact = candidates.firstIndex(where: { $0.windowID == window.id }) { return exact }
         if let unique = uniqueIdentifierIndex(targetIdentifier: window.accessibilityIdentifier,
-                                               candidateIdentifiers: candidates.map(\.identifier)) { return unique }
+                                               candidateIdentifiers: candidates.map(\.identifier)),
+           candidates[unique].windowID == nil { return unique }
         let scored = candidates.enumerated().compactMap { index, candidate -> (Int, Int)? in
+            // A known, different ID is contradictory evidence, not a fallback.
+            guard candidate.windowID == nil else { return nil }
             guard let score = fallbackScore(candidateTitle: window.title, candidateBounds: window.bounds,
-                candidateIsMinimized: window.isMinimized, candidateOrdinal: window.accessibilityOrdinal ?? Int.max / 2,
+                candidateIsMinimized: window.isMinimized, candidateOrdinal: 0,
                 accessibilityTitle: candidate.title, accessibilityBounds: candidate.bounds,
-                accessibilityIsMinimized: candidate.isMinimized, accessibilityOrdinal: candidate.ordinal) else { return nil }
+                accessibilityIsMinimized: candidate.isMinimized, accessibilityOrdinal: 0) else { return nil }
             return (index, score)
         }
-        return scored.max(by: { $0.1 < $1.1 })?.0
+        guard let best = scored.max(by: { $0.1 < $1.1 }),
+              scored.filter({ $0.1 == best.1 }).count == 1 else { return nil }
+        return best.0
     }
 }
 
@@ -132,6 +143,10 @@ private final class AXWindowActivationDriver: WindowActivationDriving {
     }
 
     func resolve(_ window: WindowInfo) -> Bool {
+        target = nil
+        guard let running, !running.isTerminated,
+              (running.bundleIdentifier ?? "") == window.bundleIdentifier,
+              window.processLaunchDate == nil || running.launchDate == window.processLaunchDate else { return false }
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value) == .success,
               let elements = value as? [AXUIElement] else { return false }

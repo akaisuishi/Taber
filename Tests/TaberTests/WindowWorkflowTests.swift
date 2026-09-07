@@ -84,7 +84,7 @@ final class WindowWorkflowTests: XCTestCase {
     }
     func test04FocusedWindowWinsOverMainWindow() async {
         let (m, _) = manager([window(), window(2)], [ax(1, main: true), ax(2, focused: true)])
-        XCTExpectFailure("S04: main is currently conflated with focused") { XCTAssertEqual(m.frontmostWindow()?.id, 2) }
+        XCTAssertEqual(m.frontmostWindow()?.id, 2)
     }
     func test05ChromeNormalAndIncognitoSelectExactIdentity() async {
         for id: UInt32 in [1, 2] {
@@ -102,7 +102,7 @@ final class WindowWorkflowTests: XCTestCase {
     }
     func test08OverlappingWindowsSurviveAXUnavailable() async {
         let (m, _) = manager([window(), window(2)], [])
-        XCTExpectFailure("S08: geometry-only fallback drops real windows") { XCTAssertEqual(m.windows.count, 2) }
+        XCTAssertEqual(m.windows.count, 2)
     }
     func test09ImmediateMinimizeUsesAXState() async {
         let (m, _) = manager([window()], [ax(1, minimized: true)])
@@ -126,7 +126,7 @@ final class WindowWorkflowTests: XCTestCase {
         let c = WindowActivationCoordinator(clock: clock) { $0.id == 1 ? a : b }
         c.activate(window(minimized: true)); c.activate(window(2))
         let before = a.operations.count; clock.advance()
-        XCTExpectFailure("S12: delayed restoration is not cancelled") { XCTAssertEqual(a.operations.count, before) }
+        XCTAssertEqual(a.operations.count, before)
     }
     func test13HiddenApplicationIsActivatedAfterTargetResolution() async {
         let d = FixtureDriver()
@@ -137,12 +137,10 @@ final class WindowWorkflowTests: XCTestCase {
     func test14ClosedWindowDoesNotActivateDifferentWindow() async {
         let d = FixtureDriver(); d.exists = false
         WindowActivationCoordinator(clock: ManualActivationClock()) { _ in d }.activate(window())
-        XCTExpectFailure("S14: unresolved targets still activate the application") { XCTAssertFalse(d.operations.contains("activate")) }
+        XCTAssertFalse(d.operations.contains("activate"))
     }
     func test15StaleWindowIDDoesNotMatchReplacementByGeometry() async {
-        XCTExpectFailure("S15: known mismatching IDs still fall back to geometry") {
-            XCTAssertNil(WindowMatchingPolicy.activationCandidateIndex(for: window(), in: [candidate(99)]))
-        }
+        XCTAssertNil(WindowMatchingPolicy.activationCandidateIndex(for: window(), in: [candidate(99)]))
     }
     func test16OtherSpaceIsDisplayed() async {
         let (m, s) = manager([window()], [ax(1)])
@@ -158,18 +156,29 @@ final class WindowWorkflowTests: XCTestCase {
         let (m, _) = manager([window()], [ax(1)])
         XCTAssertNil(m.windows[0].spaceNumber)
         XCTAssertFalse(m.windows[0].spaceLabel.contains("Space 1"))
+        let map = SpaceResolver.managedSpaceMap(from: [["Spaces": [["id64": 1, "type": 0], ["id64": 2, "type": 0], ["id64": 3, "type": 0]]]])
+        let multiple = SpaceResolver.resolveMembership([1, 2], managed: map)
+        XCTAssertNil(multiple?.number)
+        XCTAssertEqual(window().withResolvedSpace(multiple).spaceLabel, "Spaces 1, 2")
+        let all = SpaceResolver.resolveMembership([1, 2, 3], managed: map)
+        XCTAssertEqual(window().withResolvedSpace(all).spaceLabel, "Todos os Desktops")
+        XCTAssertNil(SpaceResolver.resolveMembership([99], managed: map))
     }
     func test19SeparateDisplaySpacesHaveDistinctNumbers() async {
         let map = SpaceResolver.managedSpaceMap(from: [
             ["Display Identifier": "A", "Spaces": [["id64": 10, "type": 0]]],
             ["Display Identifier": "B", "Spaces": [["id64": 20, "type": 0]]]])
         XCTAssertNotEqual(map[10]?.number, map[20]?.number)
+        XCTAssertEqual(map[20]?.displayIdentifier, "B")
     }
     func test20SmallScreenMetricsStayFinite() async {
         for style in SwitcherStyle.allCases {
             let size = SwitcherPanelController.requestedSize(for: style, windows: [window()], metrics: .init(size: .compact), isSearching: true)
             XCTAssertTrue(size.width.isFinite && size.height.isFinite)
             XCTAssertGreaterThan(size.width, 0)
+            for frame in [CGRect(x: 0, y: 0, width: 640, height: 480), CGRect(x: -1280, y: -720, width: 1280, height: 720)] {
+                XCTAssertTrue(frame.contains(SwitcherPanelController.fittedFrame(requested: size, visibleFrame: frame)))
+            }
         }
     }
     func test21NativeFullscreenKeepsExactWindowActivation() async {
@@ -256,6 +265,52 @@ final class WindowWorkflowTests: XCTestCase {
         XCTAssertEqual(model.thumbnailGeneration, 100)
         XCTAssertEqual(model.selectedIndex, 99)
         XCTAssertEqual(model.windows.count, 200)
+        var budget = ThumbnailRequestBudget()
+        let old = budget.acquire()!
+        budget.begin()
+        XCTAssertFalse(budget.accepts(old))
+        for _ in 0..<100 { _ = budget.acquire() }
+        XCTAssertEqual(budget.active, budget.limit)
+        for _ in 0..<100 { budget.release() }
+        XCTAssertEqual(budget.active, 0)
+    }
+
+    func test34AXOnlyMinimizedWindowSurvivesWindowServerTransition() async {
+        let (m, _) = manager([window()], [ax(1), ax(2, minimized: true)])
+        XCTAssertEqual(m.windows.map(\.id), [1, 2])
+        XCTAssertTrue(m.windows[1].isMinimized)
+    }
+
+    func test35AmbiguousLegacyIdentityIsRejected() async {
+        XCTAssertNil(WindowMatchingPolicy.activationCandidateIndex(for: window(), in: [candidate(nil), candidate(nil, ordinal: 8)]))
+        XCTAssertNil(WindowMatchingPolicy.preferredContentHostIndex(presentationOrdinal: 0, presentationDocument: "",
+            candidates: [(0, 1, ""), (1, 2, "")], requireUniqueHost: true))
+    }
+
+    func test36NoCurrentWindowDoesNotSkipFirstMinimizedTarget() async {
+        let s = FixtureSource()
+        s.raw = [window(minimized: true), window(2, minimized: true)]
+        s.ax = [ax(1, minimized: true), ax(2, minimized: true)]
+        let (m, p, _) = monitor(s)
+        m.beginOrAdvanceCycle(reverse: false)
+        XCTAssertEqual(p.model.selectedIndex, 0)
+        m.cancelCycle()
+    }
+
+    func test37ClosedPresentationHostIsNotActivated() async {
+        let d = FixtureDriver(); d.exists = false
+        WindowActivationCoordinator(clock: ManualActivationClock()) { _ in d }
+            .activate(window(full: true, mode: .activateApplication))
+        XCTAssertEqual(d.operations, ["resolve"])
+    }
+
+    func test38NewCycleCancelsOutstandingRestoration() async {
+        let d = FixtureDriver(), clock = ManualActivationClock()
+        let c = WindowActivationCoordinator(clock: clock) { _ in d }
+        c.activate(window(minimized: true))
+        c.cancelPending(); let before = d.operations
+        clock.advance()
+        XCTAssertEqual(d.operations, before)
     }
 
     func test33RepeatablePerformanceFixture() async {

@@ -124,7 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         let workItem = DispatchWorkItem { [weak self] in
-            self?.switcherPanelController.hide()
+            self?.switcherPanelController.hideDemo()
         }
         previewHideWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: workItem)

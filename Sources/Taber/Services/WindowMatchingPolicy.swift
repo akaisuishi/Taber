@@ -131,7 +131,8 @@ enum WindowMatchingPolicy {
     static func preferredContentHostIndex(
         presentationOrdinal: Int,
         presentationDocument: String,
-        candidates: [(index: Int, ordinal: Int, document: String)]
+        candidates: [(index: Int, ordinal: Int, document: String)],
+        requireUniqueHost: Bool = false
     ) -> Int? {
         guard !candidates.isEmpty else { return nil }
         if !presentationDocument.isEmpty {
@@ -142,9 +143,10 @@ enum WindowMatchingPolicy {
                 return documentMatches[0].index
             }
         }
-        return candidates.min {
-            abs($0.ordinal - presentationOrdinal) < abs($1.ordinal - presentationOrdinal)
-        }?.index
+        // Ordinal proximity cannot identify the hosting tab of a player.
+        // Preserve ambiguous surfaces instead of merging unrelated windows.
+        if requireUniqueHost { return candidates.count == 1 ? candidates[0].index : nil }
+        return candidates.min { abs($0.ordinal - presentationOrdinal) < abs($1.ordinal - presentationOrdinal) }?.index
     }
 
     static func approximatelyEqual(

@@ -26,6 +26,20 @@ struct VisualChecks {
             try render(QuickSettingsView(settings: settings, monitor: monitor, onOpenSettings: {}, onQuit: {}), size: CGSize(width: 320, height: 366), to: output.appendingPathComponent("menu-\(theme.rawValue).png"))
             count += 1
             for style in SwitcherStyle.allCases {
+                for emptySearch in [false, true] {
+                    let model = SwitcherViewModel()
+                    model.isDemo = true
+                    let windows = emptySearch ? [] : WindowInfo.demoWindows
+                    model.present(windows: windows, selectedIndex: 0, style: style, theme: theme, size: .large)
+                    if emptySearch {
+                        model.updateSearch(windows: [], selectedIndex: 0, query: "nenhum resultado", isSearching: true)
+                        model.setSearchDetached()
+                    }
+                    try render(SwitcherView(model: model),
+                        size: CGSize(width: 640, height: 360),
+                        to: output.appendingPathComponent("edge-\(style.rawValue)-\(theme.rawValue)-\(emptySearch ? "empty-search" : "small-screen").png"))
+                    count += 1
+                }
                 for size in SwitcherSize.allCases {
                     for windowCount in [1, 3, 12] {
                         let model = SwitcherViewModel()

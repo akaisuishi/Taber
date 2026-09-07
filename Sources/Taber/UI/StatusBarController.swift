@@ -28,7 +28,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         popover.behavior = .transient
         popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         popover.delegate = self
-        popover.contentViewController = NSHostingController(rootView: QuickSettingsView(settings: settings, monitor: monitor, onOpenSettings: { [weak self] in self?.openSettings() }, onQuit: { [weak self] in self?.quit() }))
+        popover.contentViewController = NSHostingController(rootView: QuickSettingsView(settings: settings, monitor: monitor, onOpenSettings: { [weak self] in self?.openSettings() }, onQuit: { [weak self] in self?.quit() }, onDismiss: { [weak self] in self?.popover.performClose(nil) }))
     }
 
     @objc private func togglePopover() {
@@ -64,6 +64,7 @@ struct QuickSettingsView: View {
     @ObservedObject var monitor: GlobalShortcutMonitor
     let onOpenSettings: () -> Void
     let onQuit: () -> Void
+    var onDismiss: () -> Void = {}
     private var palette: TaberThemePalette { settings.appTheme.palette }
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -114,6 +115,6 @@ struct QuickSettingsView: View {
         .environment(\.taberThemePalette, palette)
         .preferredColorScheme(settings.appTheme.colorScheme)
         .environment(\.colorScheme, settings.appTheme.colorScheme)
-        .onExitCommand { NSApp.keyWindow?.performClose(nil) }
+        .onExitCommand(perform: onDismiss)
     }
 }

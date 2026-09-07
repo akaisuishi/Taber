@@ -9,6 +9,20 @@ enum WindowThumbnailResult {
     case unavailable
 }
 
+struct ThumbnailRequestBudget {
+    private(set) var generation: UInt = 0
+    private(set) var active = 0
+    let limit = 6
+    mutating func begin() { generation &+= 1 }
+    mutating func acquire() -> UInt? {
+        guard active < limit else { return nil }
+        active += 1
+        return generation
+    }
+    mutating func release() { active = max(0, active - 1) }
+    func accepts(_ token: UInt) -> Bool { token == generation }
+}
+
 @MainActor
 final class WindowThumbnailService {
     static let shared = WindowThumbnailService()
@@ -20,6 +34,8 @@ final class WindowThumbnailService {
     private var lastContentRefresh = Date.distantPast
     private var thumbnailCacheGeneration: UInt = 0
     private var lastThumbnailGenerationRefresh = Date.distantPast
+    private var budget = ThumbnailRequestBudget()
+    private var contentEpoch: UInt = 0
 
     private init() {
         cache.totalCostLimit = 128 * 1_024 * 1_024
@@ -35,10 +51,13 @@ final class WindowThumbnailService {
         // cartão, enquanto a geração interna permite reaproveitar por um
         // intervalo curto a mesma imagem em Command+Tab consecutivos.
         _ = generation
-        let key = "\(thumbnailCacheGeneration):\(window.id):\(Int(targetSize.width))x\(Int(targetSize.height))" as NSString
+        guard CGPreflightScreenCaptureAccess() else { return .permissionRequired }
+        let key = "\(thumbnailCacheGeneration):\(window.ownerPID):\(window.processLaunchDate?.timeIntervalSince1970 ?? 0):\(window.id):\(Int(targetSize.width))x\(Int(targetSize.height))" as NSString
         if let cached = cache.object(forKey: key) {
             return .image(cached)
         }
+        guard !Task.isCancelled, let token = budget.acquire() else { return .unavailable }
+        defer { budget.release() }
 
         let captureStartedAt = ContinuousClock.now
 
@@ -52,6 +71,8 @@ final class WindowThumbnailService {
                 logger.notice("Janela \(window.id) não foi disponibilizada pelo ScreenCaptureKit")
                 return .unavailable
             }
+            guard !Task.isCancelled, budget.accepts(token),
+                  captureWindow.owningApplication?.processID == window.ownerPID else { return .unavailable }
 
             let filter = SCContentFilter(desktopIndependentWindow: captureWindow)
             let configuration = captureConfiguration(
@@ -62,6 +83,7 @@ final class WindowThumbnailService {
                 contentFilter: filter,
                 configuration: configuration
             )
+            guard !Task.isCancelled, budget.accepts(token) else { return .unavailable }
             let image = NSImage(
                 cgImage: cgImage,
                 size: NSSize(width: cgImage.width, height: cgImage.height)
@@ -73,6 +95,7 @@ final class WindowThumbnailService {
             )
             return .image(image)
         } catch {
+            guard !Task.isCancelled, budget.accepts(token) else { return .unavailable }
             logger.error("Falha ao capturar janela \(window.id): \(error.localizedDescription, privacy: .public)")
             invalidateShareableContent()
             return .unavailable
@@ -80,6 +103,7 @@ final class WindowThumbnailService {
     }
 
     func beginPresentation() {
+        budget.begin()
         let now = Date()
         if now.timeIntervalSince(lastThumbnailGenerationRefresh) >= 1.5 {
             thumbnailCacheGeneration &+= 1
@@ -96,6 +120,7 @@ final class WindowThumbnailService {
     }
 
     private func shareableWindow(withID windowID: CGWindowID) async throws -> SCWindow? {
+        let epoch = contentEpoch
         if Date().timeIntervalSince(lastContentRefresh) < 2,
            let window = shareableWindows[windowID] {
             return window
@@ -117,6 +142,7 @@ final class WindowThumbnailService {
 
         do {
             let content = try await task.value
+            guard epoch == contentEpoch else { throw CancellationError() }
             shareableWindows = Dictionary(
                 uniqueKeysWithValues: content.windows.map { ($0.windowID, $0) }
             )
@@ -124,7 +150,7 @@ final class WindowThumbnailService {
             shareableContentTask = nil
             return shareableWindows[windowID]
         } catch {
-            shareableContentTask = nil
+            if epoch == contentEpoch { shareableContentTask = nil }
             throw error
         }
     }
@@ -153,6 +179,8 @@ final class WindowThumbnailService {
     }
 
     private func invalidateShareableContent() {
+        contentEpoch &+= 1
+        shareableContentTask?.cancel()
         shareableWindows = [:]
         lastContentRefresh = .distantPast
         shareableContentTask = nil
