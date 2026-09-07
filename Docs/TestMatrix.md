@@ -1,5 +1,10 @@
 # Matriz de alternância — 1.1
 
+Esta matriz registra o resultado das execuções. O contrato de comportamento,
+incluindo sinais CG/AX, regras de inclusão, ativação, miniaturas e casos que ainda
+dependem de ambiente real, está no
+[inventário de cenários de janelas](WindowScenarios.md).
+
 ## Como reproduzir
 
 **zsh Scripts/test.sh** executa as 20 verificações anteriores, o target de lógica
