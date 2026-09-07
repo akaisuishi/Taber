@@ -20,8 +20,9 @@ final class SettingsWindowController: NSWindowController {
         let window = NSWindow(contentViewController: NSHostingController(rootView: view))
         window.title = "Taber"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 720, height: 780))
-        window.minSize = NSSize(width: 680, height: 620)
+        window.setContentSize(NSSize(width: 880, height: 660))
+        window.minSize = NSSize(width: 780, height: 602)
+        window.setFrameAutosaveName("TaberSettings")
         window.titlebarAppearsTransparent = true
         window.center()
         super.init(window: window)

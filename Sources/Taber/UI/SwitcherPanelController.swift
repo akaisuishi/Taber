@@ -13,6 +13,8 @@ final class SwitcherViewModel: ObservableObject {
     @Published private(set) var isSearching = false
     @Published private(set) var isSearchDetached = false
     @Published private(set) var thumbnailGeneration: UInt = 0
+    var isDemo = false
+    var keepSearchOpen = true
 
     func present(
         windows: [WindowInfo],
@@ -84,9 +86,13 @@ final class SwitcherPanelController {
         selectedIndex: Int,
         style: SwitcherStyle,
         theme: AppTheme,
-        size: SwitcherSize
+        size: SwitcherSize,
+        isDemo: Bool = false,
+        keepSearchOpen: Bool = true
     ) {
-        WindowThumbnailService.shared.beginPresentation()
+        model.isDemo = isDemo
+        model.keepSearchOpen = keepSearchOpen
+        if !isDemo { WindowThumbnailService.shared.beginPresentation() }
         // Ajuste o frame ainda com o painel oculto. Publicar o novo conteúdo
         // antes do resize podia exibir por um instante o tamanho anterior.
         resizeAndCenter(for: style, windows: windows, size: size, isSearching: false)
@@ -162,7 +168,7 @@ final class SwitcherPanelController {
         isSearching: Bool
     ) {
         let metrics = SwitcherMetrics(size: size)
-        let requestedSize = requestedSize(
+        let requestedSize = Self.requestedSize(
             for: style,
             windows: windows,
             metrics: metrics,
@@ -184,7 +190,7 @@ final class SwitcherPanelController {
         panel.setFrame(NSRect(origin: origin, size: fittedSize), display: true)
     }
 
-    private func requestedSize(
+    static func requestedSize(
         for style: SwitcherStyle,
         windows: [WindowInfo],
         metrics: SwitcherMetrics,
@@ -254,7 +260,7 @@ final class SwitcherPanelController {
         )
     }
 
-    private func measuredWidth(
+    private static func measuredWidth(
         _ text: String,
         fontSize: CGFloat,
         weight: NSFont.Weight

@@ -333,7 +333,8 @@ final class GlobalShortcutMonitor: ObservableObject {
                 selectedIndex: selectedIndex,
                 style: settings.switcherStyle,
                 theme: settings.appTheme,
-                size: settings.switcherSize
+                size: settings.switcherSize,
+                keepSearchOpen: settings.keepSearchOpen
             )
         } else {
             moveSelection(by: reverse ? -1 : 1)

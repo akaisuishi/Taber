@@ -47,12 +47,12 @@ struct SwitcherMetrics {
     private var scale: CGFloat { size.scale }
 
     var panelOuterPadding: CGFloat { 4 }
-    var panelCornerRadius: CGFloat { 22 * scale }
+    var panelCornerRadius: CGFloat { 18 }
     var headerFont: CGFloat { 11 * scale }
     var headerHorizontalPadding: CGFloat { 18 * scale }
     var headerTopPadding: CGFloat { 13 * scale }
     var headerBottomPadding: CGFloat { 7 * scale }
-    var headerHeight: CGFloat { 38 * scale }
+    var headerHeight: CGFloat { 36 * scale }
     var searchBarHeight: CGFloat { 44 * scale }
     var searchMinimumWidth: CGFloat { 360 * scale }
     var contentHorizontalPadding: CGFloat { 14 * scale }
@@ -78,7 +78,7 @@ struct SwitcherMetrics {
 
     var iconSize: CGFloat { 58 * scale }
     var iconItemWidth: CGFloat { 96 * scale }
-    var iconBodyHeight: CGFloat { 128 * scale }
+    var iconBodyHeight: CGFloat { 146 * scale }
 
     var flowPreviewWidth: CGFloat { 540 * scale }
     var flowPreviewHeight: CGFloat { 304 * scale }

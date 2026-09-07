@@ -110,16 +110,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func previewSwitcher(style: SwitcherStyle) {
-        windowManager.refresh(includeUtilityWindows: settings.includeUtilityWindows)
-        guard !windowManager.windows.isEmpty else { return }
-
         previewHideWorkItem?.cancel()
         switcherPanelController.show(
-            windows: windowManager.windows,
-            selectedIndex: min(1, windowManager.windows.count - 1),
+            windows: WindowInfo.demoWindows,
+            selectedIndex: 1,
             style: style,
             theme: settings.appTheme,
-            size: settings.switcherSize
+            size: settings.switcherSize,
+            isDemo: true
         )
 
         let workItem = DispatchWorkItem { [weak self] in

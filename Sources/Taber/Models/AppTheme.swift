@@ -103,7 +103,7 @@ struct TaberThemePalette {
 
     var selection: LinearGradient {
         LinearGradient(
-            colors: [accent.opacity(0.38), accent.opacity(0.28), accentSecondary.opacity(0.30)],
+            colors: [accent.opacity(0.14), accent.opacity(0.10), accentSecondary.opacity(0.08)],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
@@ -118,5 +118,62 @@ extension EnvironmentValues {
     var taberThemePalette: TaberThemePalette {
         get { self[TaberThemePaletteKey.self] }
         set { self[TaberThemePaletteKey.self] = newValue }
+    }
+}
+
+enum TaberDesign {
+    static let radius: CGFloat = 12
+    static let transitionDuration = 0.15
+}
+
+struct TaberSurfaceBackground: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    let color: Color
+    var material: NSVisualEffectView.Material = .popover
+    var body: some View {
+        ZStack {
+            if !reduceTransparency { TaberMaterial(material: material) }
+            color.opacity(reduceTransparency ? 1 : 0.94)
+        }
+    }
+}
+
+private struct TaberMaterial: NSViewRepresentable {
+    let material: NSVisualEffectView.Material
+    func makeNSView(context: Context) -> NSVisualEffectView { NSVisualEffectView() }
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.material = material
+        view.blendingMode = .behindWindow
+        view.state = .active
+    }
+}
+
+struct TaberChoiceSurface: View {
+    @Environment(\.taberThemePalette) private var palette
+    @Environment(\.colorSchemeContrast) private var contrast
+    var selected: Bool
+    var radius: CGFloat = TaberDesign.radius
+    var body: some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .fill(selected ? AnyShapeStyle(palette.selection) : AnyShapeStyle(palette.surface.opacity(0.35)))
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .stroke(selected ? palette.accent : (contrast == .increased ? palette.secondary : palette.border.opacity(0.65)), lineWidth: selected ? 1.5 : 1)
+            }
+    }
+}
+
+struct KeycapStyle: ViewModifier {
+    @Environment(\.taberThemePalette) private var palette
+    func body(content: Content) -> some View {
+        content.font(.system(size: 11, weight: .medium, design: .monospaced))
+            .padding(.horizontal, 7).padding(.vertical, 4)
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 5))
+    }
+}
+
+extension SwitcherStyle {
+    var shortTitle: String {
+        switch self { case .preview: "Miniaturas"; case .list: "Lista"; case .icons: "Ícones"; case .flow: "Fluxo" }
     }
 }

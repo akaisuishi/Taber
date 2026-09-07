@@ -2,70 +2,79 @@ import AppKit
 import CoreGraphics
 import SwiftUI
 
+enum SettingsSection: String, CaseIterable, Identifiable {
+    case appearance, behavior, shortcuts, permissions
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .appearance: "Aparência"
+        case .behavior: "Comportamento"
+        case .shortcuts: "Atalhos e busca"
+        case .permissions: "Permissões e sobre"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .appearance: "slider.horizontal.3"
+        case .behavior: "switch.2"
+        case .shortcuts: "command"
+        case .permissions: "lock.shield"
+        }
+    }
+    var detail: String {
+        switch self {
+        case .appearance: "Seu espaço de trabalho, do seu jeito."
+        case .behavior: "Pequenos ajustes para o seu dia a dia."
+        case .shortcuts: "Entre uma ideia e outra, só um atalho."
+        case .permissions: "Tudo acontece aqui, no seu Mac."
+        }
+    }
+}
+
 struct SettingsView: View {
     @ObservedObject var settings: SettingsStore
     @ObservedObject var monitor: GlobalShortcutMonitor
     @State private var launchAtLogin = LaunchAtLoginService.isEnabled
-    @State private var launchAtLoginError: String?
+    @State private var launchError: String?
     @State private var permissionRevision = 0
-
-    private let onRequestAccessibility: () -> Void
-    private let onRequestScreenRecording: () -> Void
-    private let onPreviewStyle: (SwitcherStyle) -> Void
-
+    @State private var demoSelection = 1
+    let onRequestAccessibility: () -> Void
+    let onRequestScreenRecording: () -> Void
+    let onPreviewStyle: (SwitcherStyle) -> Void
     private var palette: TaberThemePalette { settings.appTheme.palette }
-    private var versionText: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
-    }
-
-    init(
-        settings: SettingsStore,
-        monitor: GlobalShortcutMonitor,
-        onRequestAccessibility: @escaping () -> Void,
-        onRequestScreenRecording: @escaping () -> Void,
-        onPreviewStyle: @escaping (SwitcherStyle) -> Void
-    ) {
-        self.settings = settings
-        self.monitor = monitor
-        self.onRequestAccessibility = onRequestAccessibility
-        self.onRequestScreenRecording = onRequestScreenRecording
-        self.onPreviewStyle = onPreviewStyle
-    }
+    private var section: SettingsSection { SettingsSection(rawValue: settings.settingsSection) ?? .appearance }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                brandHeader
-                monitorCard
-                runtimeNotice
-                themeSection
-                appearanceSection
-                behaviorSection
-                permissionsSection
-                footer
+        HStack(spacing: 0) {
+            sidebar
+            Rectangle().fill(palette.border).frame(width: 1)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(section.title).font(.system(size: 24, weight: .semibold))
+                        Text(section.detail).foregroundStyle(palette.secondary)
+                    }
+                    .accessibilityIdentifier("settings.heading")
+                    switch section {
+                    case .appearance: appearance
+                    case .behavior: behavior
+                    case .shortcuts: shortcuts
+                    case .permissions: permissions
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(32)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(28)
         }
-        .background {
-            ZStack {
-                palette.background
-                LinearGradient(
-                    colors: [
-                        palette.accent.opacity(settings.appTheme == .dark ? 0.025 : 0.10),
-                        palette.accentSecondary.opacity(settings.appTheme == .dark ? 0.015 : 0.065),
-                        .clear
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            }
-            .ignoresSafeArea()
-        }
+        .background(palette.background)
         .foregroundStyle(palette.primary)
+        .font(.system(size: 13))
         .tint(palette.accent)
         .preferredColorScheme(settings.appTheme.colorScheme)
+        .environment(\.colorScheme, settings.appTheme.colorScheme)
         .environment(\.taberThemePalette, palette)
-        .frame(minWidth: 680, minHeight: 680)
+        .frame(minWidth: 780, minHeight: 580)
         .onAppear { launchAtLogin = LaunchAtLoginService.isEnabled }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             permissionRevision += 1
@@ -73,424 +82,257 @@ struct SettingsView: View {
         }
     }
 
-    private var brandHeader: some View {
-        HStack(spacing: 17) {
-            Image(nsImage: NSApp.applicationIconImage)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 72, height: 72)
-                .shadow(color: palette.accent.opacity(0.24), radius: 16, y: 7)
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Taber")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                Text("Seu Mac, janela por janela.")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Text("Command + Tab como sempre deveria ter sido.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-            Spacer()
-            Text(versionText)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.tertiary)
-        }
-    }
-
-    private var themeSection: some View {
-        section(title: "Tema", subtitle: "Escolha a atmosfera do Taber nas configurações e no alternador.") {
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 28) {
             HStack(spacing: 10) {
-                ForEach(AppTheme.allCases) { theme in
-                    let themePalette = theme.palette
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            settings.appTheme = theme
-                        }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 9) {
-                            HStack {
-                                Image(systemName: theme.symbolName)
-                                    .font(.system(size: 16, weight: .semibold))
-                                Spacer()
-                                HStack(spacing: -3) {
-                                    Circle().fill(themePalette.accentSecondary).frame(width: 13, height: 13)
-                                    Circle().fill(themePalette.accent).frame(width: 13, height: 13)
-                                    Circle().fill(themePalette.panel).frame(width: 13, height: 13)
-                                }
-                            }
-                            .foregroundStyle(themePalette.accent)
-
-                            Text(theme.title)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(themePalette.primary)
-                            Text(theme.description)
-                                .font(.caption2)
-                                .foregroundStyle(themePalette.secondary)
-                                .lineLimit(2)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 82, alignment: .leading)
-                        .padding(12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                                .fill(themePalette.panel)
-                        )
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                                .stroke(
-                                    settings.appTheme == theme
-                                        ? themePalette.accent.opacity(0.85)
-                                        : themePalette.border,
-                                    lineWidth: settings.appTheme == theme ? 1.5 : 1
-                                )
-                        }
+                Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 36, height: 36)
+                Text("Taber").font(.system(size: 20, weight: .semibold))
+            }.padding(.horizontal, 12)
+            VStack(spacing: 4) {
+                ForEach(SettingsSection.allCases) { item in
+                    Button { settings.settingsSection = item.rawValue } label: {
+                        Label(item.title, systemImage: item.symbol)
+                            .font(.system(size: 12, weight: section == item ? .semibold : .regular))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12).padding(.vertical, 10)
+                            .background(section == item ? palette.surface : .clear, in: RoundedRectangle(cornerRadius: 8))
+                            .foregroundStyle(section == item ? palette.primary : palette.secondary)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings.section.\(item.rawValue)")
+                    .accessibilityAddTraits(section == item ? .isSelected : [])
                 }
-            }
-        }
-    }
-
-    private var monitorCard: some View {
-        HStack(spacing: 14) {
-            Image(systemName: monitor.state.symbolName)
-                .font(.system(size: 25, weight: .semibold))
-                .foregroundStyle(monitor.state == .active ? .green : .orange)
-                .frame(width: 34)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(monitor.state.title)
-                    .font(.headline)
-                Text(monitor.state.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
             Spacer()
-            Toggle("", isOn: $settings.shortcutEnabled)
-                .labelsHidden()
-                .toggleStyle(.switch)
+            Label(settings.shortcutEnabled ? "Pronto para alternar" : "Alternância pausada", systemImage: settings.shortcutEnabled ? "circle.fill" : "pause.circle")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(palette.secondary)
+                .padding(.horizontal, 12)
+            Text("Seu Mac, janela por janela.").font(.system(size: 10)).foregroundStyle(palette.tertiary).padding(.horizontal, 12)
         }
-        .padding(17)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(monitor.state == .active ? Color.green.opacity(0.09) : Color.orange.opacity(0.09))
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(monitor.state == .active ? Color.green.opacity(0.25) : Color.orange.opacity(0.25))
-        }
+        .padding(.horizontal, 12).padding(.vertical, 28)
+        .frame(width: 180)
+        .background(TaberSurfaceBackground(color: palette.panel, material: .sidebar))
     }
 
-    @ViewBuilder
-    private var runtimeNotice: some View {
-        if Bundle.main.bundleURL.path != "/Applications/Taber.app" {
-            Label {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Build temporária do Xcode")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("Use a mesma equipe de assinatura da versão instalada. Builds ad hoc não preservam permissões.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } icon: {
-                Image(systemName: "hammer.fill")
-                    .foregroundStyle(.yellow)
-            }
-            .padding(13)
-            .background(Color.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-        }
-    }
-
-    private var appearanceSection: some View {
-        section(title: "Visual do alternador", subtitle: "Escolha como suas janelas aparecem ao segurar Command.") {
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                ForEach(SwitcherStyle.allCases) { style in
-                    Button {
-                        settings.switcherStyle = style
-                    } label: {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Image(systemName: symbol(for: style))
-                                .font(.system(size: 21, weight: .semibold))
-                                .foregroundStyle(settings.switcherStyle == style ? palette.accent : palette.secondary)
-                            Text(shortTitle(for: style))
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.primary)
-                            Text(shortDescription(for: style))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 95, alignment: .leading)
-                        .padding(13)
-                        .background(
-                            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                                .fill(settings.switcherStyle == style ? palette.accent.opacity(0.13) : palette.surface)
-                        )
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                                .stroke(settings.switcherStyle == style ? palette.accent.opacity(0.65) : palette.border)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 9) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Tamanho da interface")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("Ajusta texto, miniaturas, ícones, espaçamento e quantidade visível.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack(spacing: 9) {
-                    ForEach(SwitcherSize.allCases) { size in
-                        Button {
-                            settings.switcherSize = size
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: size.symbolName)
-                                    .font(.system(size: 15, weight: .semibold))
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(size.title)
-                                        .font(.system(size: 12, weight: .semibold))
-                                    Text(size.description)
-                                        .font(.system(size: 9.5))
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
-                                }
-                                Spacer(minLength: 0)
+    private var appearance: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 12) {
+                sectionLabel("Visual do alternador", detail: "Quatro maneiras de encontrar a próxima janela.")
+                HStack(spacing: 8) {
+                    ForEach(SwitcherStyle.allCases) { style in
+                        Button { settings.switcherStyle = style } label: {
+                            VStack(spacing: 10) {
+                                StyleMiniature(style: style).frame(height: 46)
+                                HStack(spacing: 4) {
+                                    Text(style.shortTitle)
+                                    if settings.switcherStyle == style { Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)) }
+                                }.font(.system(size: 11, weight: .medium))
                             }
-                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                            .padding(10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                    .fill(settings.switcherSize == size ? palette.accent.opacity(0.13) : palette.surface)
-                            )
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                    .stroke(settings.switcherSize == size ? palette.accent.opacity(0.65) : palette.border)
-                            }
-                        }
-                        .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity).padding(10)
+                            .background(TaberChoiceSurface(selected: settings.switcherStyle == style))
+                        }.buttonStyle(.plain)
+                            .accessibilityIdentifier("appearance.style.\(style.rawValue)")
+                            .accessibilityAddTraits(settings.switcherStyle == style ? .isSelected : [])
                     }
                 }
             }
-
-            HStack {
-                Spacer()
-                Button {
-                    onPreviewStyle(settings.switcherStyle)
-                } label: {
-                    Label("Pré-visualizar \(shortTitle(for: settings.switcherStyle))", systemImage: "play.fill")
+            VStack(spacing: 12) {
+                HStack {
+                    Label("Prévia interativa", systemImage: "play.rectangle").font(.system(size: 11, weight: .medium))
+                    Spacer()
+                    Text("Janelas de exemplo").font(.system(size: 10)).foregroundStyle(palette.tertiary)
                 }
-                .buttonStyle(.bordered)
+                DemoSwitcherPreview(style: settings.switcherStyle, selection: $demoSelection)
+                    .frame(height: 152)
+                HStack {
+                    Text("\(demoSelection + 1) de 3").monospacedDigit()
+                    Spacer()
+                    Button { demoSelection = (demoSelection + 2) % 3 } label: { Image(systemName: "arrow.left") }
+                        .accessibilityLabel("Janela anterior na prévia")
+                    Button { demoSelection = (demoSelection + 1) % 3 } label: { Image(systemName: "arrow.right") }
+                        .accessibilityLabel("Próxima janela na prévia")
+                    Button("Experimentar na tela") { onPreviewStyle(settings.switcherStyle) }
+                        .accessibilityIdentifier("appearance.preview")
+                }.font(.system(size: 11)).foregroundStyle(palette.secondary)
+            }.padding(16).background(palette.panel, in: RoundedRectangle(cornerRadius: TaberDesign.radius))
+            HStack(alignment: .top, spacing: 24) {
+                VStack(alignment: .leading, spacing: 12) {
+                    sectionLabel("Tema", detail: "A mesma identidade, outra luz.")
+                    Picker("Tema", selection: $settings.appTheme) {
+                        ForEach(AppTheme.allCases) { Text($0.title).tag($0) }
+                    }.pickerStyle(.segmented).labelsHidden().accessibilityIdentifier("appearance.theme")
+                }
+                VStack(alignment: .leading, spacing: 12) {
+                    sectionLabel("Tamanho", detail: "Encontre seu ritmo de leitura.")
+                    Picker("Tamanho", selection: $settings.switcherSize) {
+                        ForEach(SwitcherSize.allCases) { Text($0.title).tag($0) }
+                    }.pickerStyle(.segmented).labelsHidden().accessibilityIdentifier("appearance.size")
+                }
             }
         }
     }
 
-    private var behaviorSection: some View {
-        section(title: "Comportamento", subtitle: "Deixe o Taber presente sem precisar pensar nele.") {
+    private var behavior: some View {
+        VStack(spacing: 0) {
+            row("Alternar com Command + Tab", "Ativa o alternador de janelas do Taber.") { Toggle("Alternar com Command + Tab", isOn: $settings.shortcutEnabled).labelsHidden() }
+            Divider()
+            row("Abrir ao iniciar sessão", "Sempre pronto quando você ligar o Mac.") {
+                Toggle("Abrir ao iniciar sessão", isOn: $launchAtLogin).labelsHidden()
+                    .onChange(of: launchAtLogin) { _, enabled in
+                        do { try LaunchAtLoginService.setEnabled(enabled); launchError = nil }
+                        catch { launchAtLogin = LaunchAtLoginService.isEnabled; launchError = error.localizedDescription }
+                    }
+            }
+            Divider()
+            row("Incluir janelas auxiliares", "Painéis visíveis também entram na alternância.") { Toggle("Incluir janelas auxiliares", isOn: $settings.includeUtilityWindows).labelsHidden() }
+            if let launchError { Text(launchError).foregroundStyle(.red).padding(.vertical, 12) }
+        }.padding(.horizontal, 16).background(palette.panel, in: RoundedRectangle(cornerRadius: TaberDesign.radius))
+    }
+
+    private var shortcuts: some View {
+        VStack(alignment: .leading, spacing: 24) {
             VStack(spacing: 0) {
-                settingRow(
-                    icon: "power",
-                    title: "Abrir ao iniciar sessão",
-                    detail: "Mantém o Command + Tab pronto após ligar o Mac."
-                ) {
-                    Toggle("", isOn: $launchAtLogin)
-                        .labelsHidden()
-                        .onChange(of: launchAtLogin) { _, enabled in
-                            do {
-                                try LaunchAtLoginService.setEnabled(enabled)
-                                launchAtLoginError = nil
-                            } catch {
-                                launchAtLogin = LaunchAtLoginService.isEnabled
-                                launchAtLoginError = error.localizedDescription
-                            }
-                        }
-                }
-                Divider().padding(.leading, 45)
-                settingRow(
-                    icon: "command",
-                    title: "Manter busca aberta",
-                    detail: "Depois de entrar na busca, soltar Command mantém o Taber aberto para você digitar."
-                ) {
-                    Toggle("", isOn: $settings.keepSearchOpen)
-                        .labelsHidden()
-                }
-                Divider().padding(.leading, 45)
-                settingRow(
-                    icon: "magnifyingglass",
-                    title: "Atalho da busca",
-                    detail: "Com o alternador aberto e o Command pressionado, use o atalho e digite o nome da janela."
-                ) {
+                row("Próxima janela", "Segure Command para continuar alternando.") { Text("⌘ Tab").modifier(KeycapStyle()) }
+                Divider()
+                row("Janela anterior", "Volte na sequência de janelas.") { Text("⇧ ⌘ Tab").modifier(KeycapStyle()) }
+                Divider()
+                row("Navegar", "Miniaturas e Ícones: horizontal. Lista e Fluxo: vertical.") { Text("← →  ↑ ↓").modifier(KeycapStyle()) }
+                Divider()
+                row("Cancelar", "Mantenha a janela em que você estava.") { Text("Esc").modifier(KeycapStyle()) }
+            }.padding(.horizontal, 16).background(palette.panel, in: RoundedRectangle(cornerRadius: TaberDesign.radius))
+            VStack(spacing: 0) {
+                row("Entrar na busca", "Use este atalho com o alternador aberto.") {
                     Picker("Atalho da busca", selection: $settings.searchShortcut) {
-                        ForEach(SearchShortcut.allCases) { shortcut in
-                            Text("\(shortcut.hint) — \(shortcut.title)")
-                                .tag(shortcut)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .fixedSize()
+                        ForEach(SearchShortcut.allCases) { Text($0.title).tag($0) }
+                    }.labelsHidden().frame(width: 150)
                 }
-                Divider().padding(.leading, 45)
-                settingRow(
-                    icon: "rectangle.stack.badge.plus",
-                    title: "Incluir janelas auxiliares",
-                    detail: "Inclui somente painéis auxiliares visíveis; agentes em segundo plano continuam ocultos."
-                ) {
-                    Toggle("", isOn: $settings.includeUtilityWindows)
-                        .labelsHidden()
-                }
-            }
-            .padding(.horizontal, 14)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: 13))
-
-            if let launchAtLoginError {
-                Text(launchAtLoginError)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
+                Divider()
+                row("Manter busca aberta", "Solte Command, digite e pressione Enter para abrir.") { Toggle("Manter busca aberta", isOn: $settings.keepSearchOpen).labelsHidden() }
+            }.padding(.horizontal, 16).background(palette.panel, in: RoundedRectangle(cornerRadius: TaberDesign.radius))
         }
     }
 
-    private var permissionsSection: some View {
+    private var permissions: some View {
         let _ = permissionRevision
-        return section(title: "Permissões", subtitle: "Acessibilidade intercepta o atalho e foca janelas; Gravação de Tela habilita as miniaturas.") {
-            VStack(spacing: 8) {
-                permissionRow(
-                    title: "Acessibilidade",
-                    detail: "Foca e restaura janelas",
-                    granted: AccessibilityService.isTrusted,
-                    actionTitle: "Abrir Ajustes",
-                    action: onRequestAccessibility
-                )
-                if !AccessibilityService.isTrusted {
+        return VStack(alignment: .leading, spacing: 24) {
+            VStack(spacing: 0) {
+                permission("Acessibilidade", "Permite alternar, focar e restaurar janelas.", granted: AccessibilityService.isTrusted, action: onRequestAccessibility)
+                Divider()
+                permission("Gravação de Tela", "Permite mostrar prévias das suas janelas.", granted: CGPreflightScreenCaptureAccess(), action: onRequestScreenRecording)
+            }.padding(.horizontal, 16).background(palette.panel, in: RoundedRectangle(cornerRadius: TaberDesign.radius))
+            Button("Verificar permissões novamente") { permissionRevision += 1; monitor.refreshPermissions() }
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Privado por natureza", systemImage: "lock").font(.headline)
+                Text("Os títulos e as prévias ficam no seu Mac. Nenhum conteúdo das suas janelas é enviado a um servidor.").foregroundStyle(palette.secondary)
+                Text("Taber \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
+                    .font(.caption).foregroundStyle(palette.tertiary)
+            }
+        }
+    }
+
+    private func sectionLabel(_ title: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.system(size: 13, weight: .semibold))
+            Text(detail).font(.system(size: 11)).foregroundStyle(palette.secondary)
+        }
+    }
+    private func row<Content: View>(_ title: String, _ detail: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title).fontWeight(.medium)
+                Text(detail).font(.system(size: 11)).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            content().toggleStyle(.switch).controlSize(.small)
+        }.padding(.vertical, 18)
+    }
+    private func permission(_ title: String, _ detail: String, granted: Bool, action: @escaping () -> Void) -> some View {
+        row(title, detail) {
+            if granted { Label("Concedida", systemImage: "checkmark.circle").foregroundStyle(palette.secondary).font(.caption) }
+            else { Button("Autorizar", action: action) }
+        }
+    }
+}
+
+struct StyleMiniature: View {
+    @Environment(\.taberThemePalette) private var palette
+    let style: SwitcherStyle
+    var body: some View {
+        Group {
+            switch style {
+            case .preview:
+                HStack(spacing: 4) { ForEach(0..<3) { i in RoundedRectangle(cornerRadius: 4).fill(i == 1 ? palette.accent.opacity(0.35) : palette.raisedSurface).overlay(alignment: .bottom) { Capsule().fill(palette.secondary.opacity(0.3)).frame(height: 3).padding(5) } } }
+            case .list:
+                VStack(spacing: 4) { ForEach(0..<3) { i in HStack(spacing: 5) { RoundedRectangle(cornerRadius: 2).fill(palette.accent.opacity(0.4)).frame(width: 8); Capsule().fill(palette.secondary.opacity(0.3)) }.padding(3).background(i == 1 ? palette.surface : .clear, in: RoundedRectangle(cornerRadius: 3)) } }
+            case .icons:
+                HStack(spacing: 8) { ForEach(["safari", "folder", "doc.text"], id: \.self) { Image(systemName: $0).font(.system(size: 18)).foregroundStyle(palette.accent) } }
+            case .flow:
+                HStack(spacing: 5) { RoundedRectangle(cornerRadius: 4).fill(palette.accent.opacity(0.25)); VStack(spacing: 5) { ForEach(0..<3) { _ in Capsule().fill(palette.secondary.opacity(0.3)) } }.frame(width: 24) }
+            }
+        }.padding(6)
+    }
+}
+
+struct DemoSwitcherPreview: View {
+    @Environment(\.taberThemePalette) private var palette
+    let style: SwitcherStyle
+    @Binding var selection: Int
+    private let names = ["Projeto — Taber", "Documentos", "Notas de viagem"]
+    private let icons = ["safari", "folder", "doc.text"]
+    var body: some View {
+        Group {
+            switch style {
+            case .preview:
+                HStack(spacing: 8) { ForEach(0..<3) { i in Button { selection = i } label: {
                     VStack(alignment: .leading, spacing: 8) {
-                        Label(
-                            "Se o Taber já aparece ativado nos Ajustes, desligue e ligue essa opção uma vez. Isso remove a autorização da build antiga.",
-                            systemImage: "arrow.triangle.2.circlepath"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        DemoWindowContent(index: i).frame(height: 90).clipShape(RoundedRectangle(cornerRadius: 6))
+                        Text(names[i]).font(.system(size: 10, weight: .medium)).lineLimit(1)
+                    }.padding(8).background(TaberChoiceSurface(selected: selection == i))
+                }.buttonStyle(.plain) } }
+            case .list:
+                VStack(spacing: 4) { ForEach(0..<3) { demoRow($0) } }
+            case .icons:
+                HStack(spacing: 12) { ForEach(0..<3) { i in Button { selection = i } label: {
+                    VStack(spacing: 10) { Image(systemName: icons[i]).font(.system(size: 36, weight: .light)).foregroundStyle(palette.accent); Text(names[i]).font(.system(size: 10)).lineLimit(1) }
+                        .frame(maxWidth: .infinity).padding(16).background(TaberChoiceSurface(selected: selection == i))
+                }.buttonStyle(.plain) } }
+            case .flow:
+                HStack(spacing: 12) { DemoWindowContent(index: selection).clipShape(RoundedRectangle(cornerRadius: 8)); VStack(spacing: 4) { ForEach(0..<3) { demoRow($0) } }.frame(width: 180) }
+            }
+        }
+    }
+    private func demoRow(_ index: Int) -> some View {
+        Button { selection = index } label: {
+            HStack(spacing: 8) { Image(systemName: icons[index]).foregroundStyle(palette.accent); Text(names[index]).lineLimit(1); Spacer(minLength: 0); Text("\(index + 1)").foregroundStyle(palette.tertiary) }
+                .font(.system(size: 11)).padding(10).background(TaberChoiceSurface(selected: selection == index))
+        }.buttonStyle(.plain)
+    }
+}
 
-                        Button("Verificar novamente") {
-                            permissionRevision += 1
-                            monitor.refreshPermissions()
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    .padding(.horizontal, 13)
-                    .padding(.bottom, 7)
+struct DemoWindowContent: View {
+    @Environment(\.taberThemePalette) private var palette
+    let index: Int
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 3) { ForEach(0..<3) { _ in Circle().fill(palette.secondary.opacity(0.35)).frame(width: 4, height: 4) }; Spacer(); Capsule().fill(palette.surface).frame(width: 40, height: 4); Spacer() }.padding(8)
+            Divider()
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 7) { ForEach(0..<4) { i in Capsule().fill(i == index ? palette.accent.opacity(0.4) : palette.surface).frame(height: 4) }; Spacer(minLength: 0) }.frame(width: 24)
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(["Uma nova perspectiva.", "Tudo ao seu alcance.", "Ideias ganham forma."][index % 3]).font(.system(size: 10, weight: .semibold)).lineLimit(2)
+                    RoundedRectangle(cornerRadius: 4).fill(LinearGradient(colors: [palette.accent.opacity(0.28), palette.accentSecondary.opacity(0.16)], startPoint: .topLeading, endPoint: .bottomTrailing)).frame(maxHeight: .infinity)
+                    Capsule().fill(palette.surface).frame(height: 4)
                 }
-                permissionRow(
-                    title: "Gravação de Tela",
-                    detail: "Exibe miniaturas do conteúdo",
-                    granted: CGPreflightScreenCaptureAccess(),
-                    actionTitle: "Abrir Ajustes",
-                    action: onRequestScreenRecording
-                )
-            }
-        }
+            }.padding(10)
+        }.background(palette.background)
     }
+}
 
-    private var footer: some View {
-        HStack {
-            Label("Privado por design — nenhuma janela sai do seu Mac", systemImage: "lock.fill")
-            Spacer()
-            Text("⌘ Tab • \(settings.searchShortcut.hint) buscar • \(settings.switcherStyle.directionalHint) • Esc")
-                .font(.caption.monospaced())
-        }
-        .font(.caption)
-        .foregroundStyle(.tertiary)
-    }
-
-    private func section<Content: View>(
-        title: String,
-        subtitle: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 11) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.headline)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
-            }
-            content()
-        }
-    }
-
-    private func settingRow<Accessory: View>(
-        icon: String,
-        title: String,
-        detail: String,
-        @ViewBuilder accessory: () -> Accessory
-    ) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .foregroundStyle(palette.accent)
-                .frame(width: 22)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 13, weight: .semibold))
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            accessory()
-        }
-        .padding(.vertical, 12)
-    }
-
-    private func permissionRow(
-        title: String,
-        detail: String,
-        granted: Bool,
-        actionTitle: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: granted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                .foregroundStyle(granted ? .green : .orange)
-                .font(.system(size: 18))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 13, weight: .semibold))
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            if granted {
-                Text("Concedida")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.green)
-            } else {
-                Button(actionTitle, action: action)
-            }
-        }
-        .padding(13)
-        .background(palette.surface, in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    private func symbol(for style: SwitcherStyle) -> String {
-        switch style {
-        case .preview: "rectangle.inset.filled.and.person.filled"
-        case .list: "list.bullet.rectangle"
-        case .icons: "square.grid.3x2.fill"
-        case .flow: "rectangle.stack.fill"
-        }
-    }
-
-    private func shortTitle(for style: SwitcherStyle) -> String {
-        switch style {
-        case .preview: "Miniaturas"
-        case .list: "Lista"
-        case .icons: "Ícones"
-        case .flow: "Fluxo"
-        }
-    }
-
-    private func shortDescription(for style: SwitcherStyle) -> String {
-        switch style {
-        case .preview: "Veja o conteúdo antes de trocar."
-        case .list: "Mais janelas em menos espaço."
-        case .icons: "Familiar e direto como o macOS."
-        case .flow: "Prévia ampla com fila de troca rápida."
+extension WindowInfo {
+    @MainActor static var demoWindows: [WindowInfo] {
+        zip(["Projeto — Taber", "Documentos", "Notas de viagem"], ["safari", "folder", "doc.text"]).enumerated().map { index, item in
+            WindowInfo(id: UInt32(index + 1), ownerPID: -1, bundleIdentifier: "com.taber.example.\(index)", applicationName: ["Safari", "Finder", "Notas"][index], title: item.0, bounds: CGRect(x: 0, y: 0, width: 1200, height: 800), isOnScreen: true, isMinimized: false, spaceNumber: index == 2 ? 2 : 1, icon: NSImage(systemSymbolName: item.1, accessibilityDescription: nil))
         }
     }
 }

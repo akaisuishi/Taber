@@ -15,6 +15,10 @@ final class SettingsStore: ObservableObject {
 
     private let defaults: UserDefaults
 
+    @Published var settingsSection: String {
+        didSet { defaults.set(settingsSection, forKey: "settingsSection") }
+    }
+
     @Published var shortcutEnabled: Bool {
         didSet { defaults.set(shortcutEnabled, forKey: Keys.shortcutEnabled) }
     }
@@ -45,6 +49,7 @@ final class SettingsStore: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        settingsSection = defaults.string(forKey: "settingsSection") ?? "appearance"
         shortcutEnabled = defaults.object(forKey: Keys.shortcutEnabled) as? Bool ?? true
         includeUtilityWindows = defaults.object(forKey: Keys.includeUtilityWindows) as? Bool ?? false
         keepSearchOpen = defaults.object(forKey: Keys.keepSearchOpen) as? Bool ?? true

@@ -51,6 +51,24 @@ Com o alternador aberto, pressione `Shift` duas vezes para pesquisar. Esse atalh
 
 As configurações ficam acessíveis pelo ícone do Taber na barra de menus. `Command + W` fecha somente essa janela e mantém o aplicativo em segundo plano; `Command + Q` encerra o Taber por completo.
 
+Um clique no ícone abre o painel rápido de visual, tema e tamanho. O clique
+direito mantém um menu nativo. Nas configurações, a sidebar separa **Aparência**,
+**Comportamento**, **Atalhos e busca** e **Permissões e sobre** e lembra a última
+seção visitada. `Command + ,` abre as configurações.
+
+### Interface refinada
+
+As prévias abaixo usam conteúdo fictício. Materiais discretos, seleção com
+contorno e tipografia de sistema mantêm o foco nas suas janelas.
+
+![Painel rápido](Docs/Images/taber-menu.png)
+![Miniaturas](Docs/Images/taber-preview.png)
+![Lista](Docs/Images/taber-list.png)
+![Ícones](Docs/Images/taber-icons.png)
+![Fluxo](Docs/Images/taber-flow.png)
+
+Consulte a [linguagem visual e validação](Docs/Design.md).
+
 ## Requisitos
 
 - macOS 14 Sonoma ou mais recente.
