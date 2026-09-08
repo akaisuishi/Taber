@@ -18,13 +18,62 @@ struct VisualChecks {
         var count = 0
         for theme in AppTheme.allCases {
             settings.appTheme = theme
-            for section in SettingsSection.allCases {
-                settings.settingsSection = section.rawValue
-                try render(SettingsView(settings: settings, monitor: monitor, onRequestAccessibility: {}, onRequestScreenRecording: {}, onPreviewStyle: { _ in }), size: CGSize(width: 880, height: 660), to: output.appendingPathComponent("settings-\(section.rawValue)-\(theme.rawValue).png"))
+            for transparencyEnabled in [false, true] {
+                settings.transparencyEnabled = transparencyEnabled
+                let transparencyName = transparencyEnabled ? "on" : "off"
+
+                // Configurações e painel rápido também participam da matriz de
+                // transparência; todas as seções são preservadas como fixtures.
+                for section in SettingsSection.allCases {
+                    settings.settingsSection = section.rawValue
+                    try render(
+                        SettingsView(settings: settings, monitor: monitor, onRequestAccessibility: {}, onRequestScreenRecording: {}, onPreviewStyle: { _ in }),
+                        size: CGSize(width: 880, height: 760),
+                        to: output.appendingPathComponent("settings-\(section.rawValue)-\(theme.rawValue)-transparency-\(transparencyName).png")
+                    )
+                    count += 1
+                }
+                try render(
+                    QuickSettingsView(settings: settings, monitor: monitor, onOpenSettings: {}, onQuit: {}),
+                    size: CGSize(width: 320, height: 410),
+                    to: output.appendingPathComponent("menu-\(theme.rawValue)-transparency-\(transparencyName).png")
+                )
                 count += 1
+
+                // Matriz de aceitação: 4 visuais × 3 temas × 3 tamanhos ×
+                // transparência ligada/desligada (72 imagens).
+                for style in SwitcherStyle.allCases {
+                    for size in SwitcherSize.allCases {
+                        let model = SwitcherViewModel()
+                        let windows = fixtureWindows(count: 3)
+                        model.isDemo = true
+                        model.present(
+                            windows: windows,
+                            selectedIndex: 1,
+                            style: style,
+                            theme: theme,
+                            size: size,
+                            transparencyEnabled: transparencyEnabled
+                        )
+                        let requested = SwitcherPanelController.requestedSize(
+                            for: style,
+                            windows: windows,
+                            metrics: SwitcherMetrics(size: size),
+                            isSearching: false
+                        )
+                        let fitted = CGSize(width: min(requested.width, 1152), height: min(requested.height, 720))
+                        try render(
+                            SwitcherView(model: model),
+                            size: fitted,
+                            to: output.appendingPathComponent("switcher-\(style.rawValue)-\(theme.rawValue)-\(size.rawValue)-transparency-\(transparencyName).png")
+                        )
+                        count += 1
+                    }
+                }
             }
-            try render(QuickSettingsView(settings: settings, monitor: monitor, onOpenSettings: {}, onQuit: {}), size: CGSize(width: 320, height: 366), to: output.appendingPathComponent("menu-\(theme.rawValue).png"))
-            count += 1
+
+            // Casos de borda continuam independentes da matriz principal para
+            // detectar regressões de busca vazia, tela pequena e volume.
             for style in SwitcherStyle.allCases {
                 for emptySearch in [false, true] {
                     let model = SwitcherViewModel()
@@ -35,29 +84,63 @@ struct VisualChecks {
                         model.updateSearch(windows: [], selectedIndex: 0, query: "nenhum resultado", isSearching: true)
                         model.setSearchDetached()
                     }
-                    try render(SwitcherView(model: model),
+                    try render(
+                        SwitcherView(model: model),
                         size: CGSize(width: 640, height: 360),
-                        to: output.appendingPathComponent("edge-\(style.rawValue)-\(theme.rawValue)-\(emptySearch ? "empty-search" : "small-screen").png"))
+                        to: output.appendingPathComponent("edge-\(style.rawValue)-\(theme.rawValue)-\(emptySearch ? "empty-search" : "small-screen").png")
+                    )
                     count += 1
                 }
                 for size in SwitcherSize.allCases {
-                    for windowCount in [1, 3, 12] {
+                    for windowCount in [1, 12] {
                         let model = SwitcherViewModel()
-                        let windows = (0..<windowCount).map { i in
-                            let base = WindowInfo.demoWindows[i % 3]
-                            return WindowInfo(id: UInt32(i + 1), ownerPID: -1, bundleIdentifier: base.bundleIdentifier, applicationName: base.applicationName, title: windowCount == 12 ? "\(base.title) — um título muito longo para verificar truncamento e alinhamento \(i)" : base.title, bounds: base.bounds, isOnScreen: true, isMinimized: false, spaceNumber: 1, icon: base.icon)
-                        }
+                        let windows = fixtureWindows(count: windowCount)
                         model.isDemo = true
-                        model.present(windows: windows, selectedIndex: min(1, windows.count - 1), style: style, theme: theme, size: size)
-                        let requested = SwitcherPanelController.requestedSize(for: style, windows: windows, metrics: SwitcherMetrics(size: size), isSearching: false)
+                        model.present(
+                            windows: windows,
+                            selectedIndex: min(1, windows.count - 1),
+                            style: style,
+                            theme: theme,
+                            size: size
+                        )
+                        let requested = SwitcherPanelController.requestedSize(
+                            for: style,
+                            windows: windows,
+                            metrics: SwitcherMetrics(size: size),
+                            isSearching: false
+                        )
                         let fitted = CGSize(width: min(requested.width, 1152), height: min(requested.height, 720))
-                        try render(SwitcherView(model: model), size: fitted, to: output.appendingPathComponent("switcher-\(style.rawValue)-\(theme.rawValue)-\(size.rawValue)-\(windowCount).png"))
+                        try render(
+                            SwitcherView(model: model),
+                            size: fitted,
+                            to: output.appendingPathComponent("edge-count-\(style.rawValue)-\(theme.rawValue)-\(size.rawValue)-\(windowCount).png")
+                        )
                         count += 1
                     }
                 }
             }
         }
         print("Rendered \(count) fixture-only views to \(output.path)")
+    }
+
+    @MainActor static func fixtureWindows(count: Int) -> [WindowInfo] {
+        (0..<count).map { index in
+            let base = WindowInfo.demoWindows[index % WindowInfo.demoWindows.count]
+            return WindowInfo(
+                id: UInt32(index + 1),
+                ownerPID: -1,
+                bundleIdentifier: base.bundleIdentifier,
+                applicationName: base.applicationName,
+                title: count == 12
+                    ? "\(base.title) — um título muito longo para verificar truncamento e alinhamento \(index)"
+                    : base.title,
+                bounds: base.bounds,
+                isOnScreen: true,
+                isMinimized: false,
+                spaceNumber: 1,
+                icon: base.icon
+            )
+        }
     }
 
     @MainActor static func render<V: View>(_ view: V, size: CGSize, to url: URL) throws {

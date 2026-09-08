@@ -20,7 +20,7 @@ Taber é um alternador de janelas para macOS que intercepta `Command + Tab` e pe
 - Exclui agentes em segundo plano, helpers, Spotlight e superfícies técnicas.
 - Oferece busca instantânea por nome do aplicativo ou título da janela.
 - Exibe miniaturas locais quando a permissão de Gravação de Tela está ativa.
-- Permite três tamanhos de interface e três temas.
+- Permite três tamanhos, três temas e transparência global opcional.
 - Pode iniciar automaticamente com a sessão do macOS.
 
 ## Aparências
@@ -33,6 +33,9 @@ Taber é um alternador de janelas para macOS que intercepta `Command + Tab` e pe
 | **Fluxo** | `↑` e `↓` | Combinar uma prévia ampla com uma fila rápida de janelas. |
 
 O painel se adapta automaticamente à quantidade de janelas. Os tamanhos **Compacto**, **Médio** e **Grande** ajustam texto, ícones, miniaturas, espaçamento e quantidade visível. Os temas disponíveis são **Original**, **Dark** e **Claro**.
+A transparência pode ser ativada nas Configurações ou no painel rápido e vale
+para o alternador, o painel e a própria janela de Configurações. A preferência
+de acessibilidade **Reduzir Transparência** do macOS sempre prevalece.
 
 <p align="center">
   <img src="Docs/Images/taber-settings.png" width="720" alt="Configurações de aparência e comportamento do Taber">
@@ -108,7 +111,9 @@ Execute **zsh Scripts/test.sh** para rodar regressões, lógica e interface no
 Xcode. Use **--logic-only** para não automatizar a interface. Consulte a
 [matriz de testes e limites de validação](Docs/TestMatrix.md) e o
 [inventário de cenários de janelas](Docs/WindowScenarios.md), que registra os
-sinais CG/AX, regras de inclusão e estratégias de ativação esperadas.
+sinais CG/AX, regras de inclusão e estratégias de ativação esperadas. Para
+diagnóstico em aplicativos reais, incluindo o League, use o
+[checklist de aceitação](Docs/WindowRefactorAcceptance.md).
 
 Build de verificação sem assinatura:
 
@@ -141,6 +146,11 @@ xcrun swiftc \
   -o /tmp/taber-window-check
 /tmp/taber-window-check
 ```
+
+A sonda oculta títulos por padrão e informa o motivo tipado de inclusão ou
+exclusão. Use `--bundle league` ou `--bundle riot` para limitar a saída durante
+a validação guiada. `--self-test` verifica fixtures da política sem consultar o
+WindowServer e `--help` mostra todas as opções.
 
 ## Arquitetura
 

@@ -87,8 +87,10 @@ final class SettingsWindowController: NSWindowController {
 
     private func applyWindowTransparency(preferenceEnabled: Bool) {
         guard let window else { return }
-        let effective = preferenceEnabled
-            && !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        let effective = TaberTransparencyPolicy.isEffective(
+            userEnabled: preferenceEnabled,
+            reduceTransparency: NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        )
         window.isOpaque = !effective
         window.backgroundColor = effective ? .clear : .windowBackgroundColor
     }

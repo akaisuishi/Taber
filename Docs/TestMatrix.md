@@ -4,12 +4,16 @@ Esta matriz registra o resultado das execuções. O contrato de comportamento,
 incluindo sinais CG/AX, regras de inclusão, ativação, miniaturas e casos que ainda
 dependem de ambiente real, está no
 [inventário de cenários de janelas](WindowScenarios.md).
+O [checklist de aceitação da refatoração](WindowRefactorAcceptance.md) descreve
+a sonda diagnóstica, os motivos tipados e a validação guiada do League sem
+atribuir aprovação ao aplicativo ainda não testado.
 
 ## Como reproduzir
 
-**zsh Scripts/test.sh** executa as 20 verificações anteriores, o target de lógica
-TaberTests e o target TaberUITests. A opção --logic-only não executa a automação
-de interface. O script imprime o diretório temporário com o .xcresult.
+**zsh Scripts/test.sh** executa as 20 verificações anteriores, quatro fixtures
+puras da sonda de elegibilidade, o target de lógica TaberTests e o target
+TaberUITests. A opção --logic-only não executa a automação de interface. O
+script imprime o diretório temporário com o .xcresult.
 Xcode deve ter autorização para automação de interface; não concedemos acesso
 silenciosamente. O target lógico compila os mesmos arquivos Swift do produto.
 
@@ -95,3 +99,25 @@ O [relatório final](Release-1.1.0.md) registra medições, instalação e limit
 validação ao vivo. A sonda real do Chrome apresentou timeout sem ciclo HID
 registrado e **não foi aprovada**. Ela é separada da suíte reproduzível e pode
 ser acionada com --live-hid. Não atribuímos aprovação ponta a ponta às simulações.
+
+## Marco da refatoração de janelas e transparência
+
+As fixtures da Task 4 ampliam esta matriz para AX-only, todas minimizadas,
+bundle aninhado, políticas `.accessory`/`.prohibited`, renderer CG-only
+League-like, superfícies ambíguas, dialog/sheet/utility, conteúdo protegido,
+Configurações local e processos técnicos. Também cobrem processo reiniciado,
+fallback sem APIs privadas, Command-up perdido, event tap desabilitado,
+exclusividade de overlays e precedência de “Reduzir Transparência”.
+
+Execução final em 08/09/2026: 20 regressões puras, 4 fixtures da sonda,
+55 testes lógicos e 1 teste de UI aprovados, sem falhas. Evidência:
+`Build/Validation/20260908-100544.xcresult`. O build universal arm64 + x86_64
+sem assinatura também passou. A matriz visual produziu 198 imagens em
+`/tmp/taber-task4-visuals-final`; combinações representativas ON/OFF dos três temas,
+quatro visuais, Configurações e painel rápido foram inspecionadas sem corte ou
+perda de contraste. O toggle também foi encontrado e acionado no teste de UI.
+
+O gate repetível de 200 janelas registrou mediana de **1,519 ms**, contra
+baseline de 5,568 ms e limite de 6,125 ms (+10%); não houve regressão. A
+validação com o League instalado continua **aguardando validação guiada** e segue o
+[checklist dedicado](WindowRefactorAcceptance.md#checklist-guiado--league-of-legends).

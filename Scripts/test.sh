@@ -7,6 +7,8 @@ mkdir -p Build/Validation
 resultPath="$PWD/Build/Validation/$(date +%Y%m%d-%H%M%S).xcresult"
 xcrun swiftc -module-cache-path "$testRun/cache" Sources/Taber/Services/WindowMatchingPolicy.swift Scripts/RegressionChecks/main.swift -o "$testRun/regressions"
 "$testRun/regressions"
+xcrun swiftc -module-cache-path "$testRun/cache" Sources/Taber/Services/WindowEligibilityPolicy.swift Scripts/WindowEligibilityCheck/main.swift -o "$testRun/window-eligibility-check"
+"$testRun/window-eligibility-check" --self-test
 selection=(-skip-testing:TaberUITests/LiveHIDIntegrationTests)
 if [[ "${1:-}" == "--logic-only" ]]; then
     selection=(-only-testing:TaberTests)

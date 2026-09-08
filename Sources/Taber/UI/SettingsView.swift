@@ -138,6 +138,13 @@ struct SettingsView: View {
                     }
                 }
             }
+            row("Transparência", "Usa o material do macOS no alternador, painel rápido e Configurações. A opção Reduzir Transparência sempre prevalece.") {
+                Toggle("Transparência", isOn: $settings.transparencyEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .accessibilityIdentifier("appearance.transparency")
+                    .accessibilityValue(settings.transparencyEnabled ? "Ativada" : "Desativada")
+            }
             VStack(spacing: 12) {
                 HStack {
                     Label("Prévia interativa", systemImage: "play.rectangle").font(.system(size: 11, weight: .medium))
@@ -170,11 +177,6 @@ struct SettingsView: View {
                         ForEach(SwitcherSize.allCases) { Text($0.title).tag($0) }
                     }.pickerStyle(.segmented).labelsHidden().accessibilityIdentifier("appearance.size")
                 }
-            }
-            row("Transparência", "Usa o material do macOS no alternador, painel rápido e Configurações. A opção Reduzir Transparência sempre prevalece.") {
-                Toggle("Transparência", isOn: $settings.transparencyEnabled)
-                    .labelsHidden()
-                    .accessibilityIdentifier("appearance.transparency")
             }
         }
     }

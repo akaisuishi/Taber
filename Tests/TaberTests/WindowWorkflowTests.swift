@@ -31,6 +31,31 @@ final class FixtureDriver: WindowActivationDriving {
 }
 
 @MainActor
+final class ApplicationFixtureDriver: WindowActivationDriving,
+    ApplicationOnlyActivationDriving, ProcessValidatingActivationDriving {
+    var processIsValid = true
+    var applicationTargetIsValid = true
+    var isMinimized = false
+    var operations: [String] = []
+
+    func validateProcess(_ window: WindowInfo) -> Bool {
+        operations.append("validate-process")
+        return processIsValid
+    }
+    func validateApplicationTarget(_ window: WindowInfo) -> Bool {
+        operations.append("validate-application")
+        return applicationTargetIsValid
+    }
+    func resolve(_ window: WindowInfo) -> Bool {
+        operations.append("resolve")
+        return false
+    }
+    func restore() { operations.append("restore") }
+    func focus() { operations.append("focus") }
+    func activateApplication() { operations.append("activate") }
+}
+
+@MainActor
 final class WindowWorkflowTests: XCTestCase {
     let rect = CGRect(x: 20, y: 40, width: 800, height: 600)
 
@@ -42,10 +67,11 @@ final class WindowWorkflowTests: XCTestCase {
                    isFullScreen: full, activationMode: mode, icon: nil)
     }
     func ax(_ id: UInt32?, focused: Bool = false, main: Bool = false, minimized: Bool = false,
-            title: String = "Documento", subrole: String = "AXStandardWindow", document: String = "") -> AccessibilityWindowSnapshot {
-        AccessibilityWindowSnapshot(windowID: id, identifier: id.map(String.init) ?? "", title: title,
+            title: String = "Documento", subrole: String = "AXStandardWindow", document: String = "",
+            identifier: String? = nil, ordinal: Int? = nil, role: String = "") -> AccessibilityWindowSnapshot {
+        AccessibilityWindowSnapshot(windowID: id, identifier: identifier ?? id.map(String.init) ?? "", title: title,
             document: document, subrole: subrole, bounds: rect, isMinimized: minimized,
-            isMain: main, isFocused: focused, ordinal: Int(id ?? 0))
+            isMain: main, isFocused: focused, ordinal: ordinal ?? Int(id ?? 0), role: role)
     }
     func manager(_ raw: [WindowInfo], _ snapshots: [AccessibilityWindowSnapshot]) -> (WindowManager, FixtureSource) {
         let source = FixtureSource(); source.raw = raw; source.ax = snapshots
@@ -54,6 +80,17 @@ final class WindowWorkflowTests: XCTestCase {
     }
     func candidate(_ id: UInt32?, title: String = "Documento", ordinal: Int = 0) -> ActivationCandidate {
         ActivationCandidate(windowID: id, identifier: "", title: title, bounds: rect, isMinimized: false, ordinal: ordinal)
+    }
+    func accessibilityWindow(identifier: String = "settings", title: String = "Configurações",
+                             pid: pid_t = 42, launchDate: Date? = nil, ordinal: Int = 0,
+                             minimized: Bool = false) -> WindowInfo {
+        let fallback = AccessibilityWindowFallback(document: "", title: title, bounds: rect, ordinal: ordinal)
+        return WindowInfo(identity: .accessibility(ownerPID: pid, launchDate: launchDate,
+            identifier: identifier, fallback: fallback), windowServerID: nil, ownerPID: pid,
+            bundleIdentifier: "com.taber.fixture", applicationName: "Taber", title: title,
+            bounds: rect, isOnScreen: !minimized, isMinimized: minimized, icon: nil,
+            accessibilityIdentifier: identifier, accessibilityOrdinal: ordinal,
+            processLaunchDate: launchDate)
     }
     func monitor(_ source: FixtureSource, style: SwitcherStyle = .list) -> (GlobalShortcutMonitor, SwitcherPanelController, SettingsStore) {
         let defaults = UserDefaults(suiteName: "com.taber.tests.\(UUID().uuidString)")!
@@ -101,7 +138,7 @@ final class WindowWorkflowTests: XCTestCase {
         XCTAssertNotEqual(m.windows[0].displayTitle, m.windows[1].displayTitle)
     }
     func test08OverlappingWindowsSurviveAXUnavailable() async {
-        let (m, _) = manager([window(), window(2)], [])
+        let (m, _) = manager([window(title: "Documento A"), window(2, title: "Documento B")], [])
         XCTAssertEqual(m.windows.count, 2)
     }
     func test09ImmediateMinimizeUsesAXState() async {
@@ -315,25 +352,315 @@ final class WindowWorkflowTests: XCTestCase {
         XCTAssertEqual(d.operations, before)
     }
 
+    func test39TransparencyDefaultsToDisabled() async {
+        let suite = "com.taber.tests.transparency-default.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        XCTAssertFalse(SettingsStore(defaults: defaults).transparencyEnabled)
+    }
+
+    func test40TransparencyPreferencePersistsWithoutChangingItsDefault() async {
+        let suite = "com.taber.tests.transparency-persistence.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let firstStore = SettingsStore(defaults: defaults)
+        firstStore.transparencyEnabled = true
+        XCTAssertTrue(SettingsStore(defaults: defaults).transparencyEnabled)
+
+        firstStore.transparencyEnabled = false
+        XCTAssertFalse(SettingsStore(defaults: defaults).transparencyEnabled)
+    }
+
+    func test41ReduceTransparencyAlwaysOverridesSavedPreference() async {
+        XCTAssertTrue(TaberTransparencyPolicy.isEffective(userEnabled: true, reduceTransparency: false))
+        XCTAssertFalse(TaberTransparencyPolicy.isEffective(userEnabled: true, reduceTransparency: true))
+        XCTAssertFalse(TaberTransparencyPolicy.isEffective(userEnabled: false, reduceTransparency: false))
+        XCTAssertFalse(TaberTransparencyPolicy.isEffective(userEnabled: false, reduceTransparency: true))
+    }
+
+    func test60AXOnlyWindowsHaveStableTypedIdentitiesWithoutInventedCGIDs() async {
+        let snapshots = [
+            ax(1, title: "Janela CG"),
+            ax(nil, minimized: true, title: "Projeto", identifier: "AX-project", ordinal: 4),
+            ax(nil, minimized: true, title: "Projeto", identifier: "", ordinal: 5)
+        ]
+        let (manager, _) = manager([window()], snapshots)
+        let axOnly = manager.windows.filter { $0.windowServerID == nil }
+
+        XCTAssertEqual(axOnly.count, 2)
+        XCTAssertEqual(Set(axOnly.map(\.id)).count, 2)
+        XCTAssertTrue(axOnly.allSatisfy(\.isMinimized))
+        guard case let .accessibility(pid, _, identifier, fallback) = axOnly[0].id else {
+            return XCTFail("A janela AX-only deve manter identidade AX tipada")
+        }
+        XCTAssertEqual(pid, 42)
+        XCTAssertEqual(identifier, "AX-project")
+        XCTAssertEqual(fallback.ordinal, 4)
+    }
+
+    func test61DuplicateAXIdentifiersAndFallbackTiesNeverPickArbitrarily() async {
+        let target = accessibilityWindow(identifier: "duplicated", title: "Mesmo título")
+        let duplicateIdentifiers = [
+            ActivationCandidate(windowID: nil, identifier: "duplicated", title: "Mesmo título",
+                bounds: rect, isMinimized: false, ordinal: 0),
+            ActivationCandidate(windowID: nil, identifier: "duplicated", title: "Mesmo título",
+                bounds: rect, isMinimized: false, ordinal: 1)
+        ]
+        XCTAssertNil(WindowMatchingPolicy.activationCandidateIndex(for: target, in: duplicateIdentifiers))
+
+        let noIdentifier = accessibilityWindow(identifier: "", title: "Mesmo título")
+        XCTAssertNil(WindowMatchingPolicy.activationCandidateIndex(for: noIdentifier, in: duplicateIdentifiers))
+    }
+
+    func test62NestedAccessoryAndProhibitedRenderersNeedCredibleUserSurfaces() async {
+        for policy in [NSApplication.ActivationPolicy.accessory, .prohibited] {
+            let legitimate = WindowEligibilityContext(bundleIdentifier: "com.riotgames.LeagueOfLegends.Game",
+                activationPolicy: policy, title: "League of Legends", bounds: rect,
+                layer: 0, alpha: 1, isOnScreen: true, isHelperProcess: true)
+            let decision = WindowEligibilityPolicy.evaluate(legitimate, includeUtilityWindows: false)
+            XCTAssertTrue(decision.isEligible)
+            XCTAssertEqual(decision.reason, .nestedRenderer)
+
+            let technical = WindowEligibilityContext(bundleIdentifier: "com.riotgames.helper",
+                activationPolicy: policy, title: "", bounds: CGRect(x: 0, y: 0, width: 32, height: 32),
+                layer: 0, alpha: 1, isOnScreen: false, isHelperProcess: true)
+            XCTAssertFalse(WindowEligibilityPolicy.allows(technical, includeUtilityWindows: true))
+        }
+    }
+
+    func test63LeagueLikeCGOnlyRendererActivatesValidatedHostApplication() async {
+        let launchDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let game = WindowInfo(id: 501, ownerPID: 700,
+            bundleIdentifier: "com.riotgames.LeagueOfLegends.Game", applicationName: "League of Legends",
+            title: "", bounds: CGRect(x: 0, y: 0, width: 2560, height: 1440),
+            isOnScreen: true, isMinimized: false, isFullScreen: true,
+            activationMode: .activateApplication, icon: nil, processLaunchDate: launchDate,
+            activationPID: 701, activationProcessLaunchDate: launchDate)
+        let driver = ApplicationFixtureDriver()
+        let result = WindowActivationCoordinator(clock: ManualActivationClock()) { _ in driver }.activate(game)
+
+        XCTAssertEqual(result.strategy, .application)
+        XCTAssertTrue(result.succeeded)
+        XCTAssertEqual(driver.operations,
+            ["validate-process", "validate-application", "activate"])
+        XCTAssertFalse(driver.operations.contains("resolve"))
+        XCTAssertFalse(driver.operations.contains("focus"))
+    }
+
+    func test64TerminatedOrRestartedProcessIsRejectedBeforeActivation() async {
+        let expected = Date(timeIntervalSince1970: 100)
+        XCTAssertFalse(WindowMatchingPolicy.representsSameProcess(expectedPID: 90,
+            expectedBundleIdentifier: "com.fixture", expectedLaunchDate: expected,
+            actualPID: 90, actualBundleIdentifier: "com.fixture",
+            actualLaunchDate: Date(timeIntervalSince1970: 101)))
+        XCTAssertFalse(WindowMatchingPolicy.representsSameProcess(expectedPID: 90,
+            expectedBundleIdentifier: "com.fixture", expectedLaunchDate: expected,
+            actualPID: 91, actualBundleIdentifier: "com.fixture", actualLaunchDate: expected))
+
+        let driver = ApplicationFixtureDriver()
+        driver.processIsValid = false
+        let result = WindowActivationCoordinator(clock: ManualActivationClock()) { _ in driver }
+            .activate(window(mode: .activateApplication))
+        XCTAssertEqual(result.outcome, .rejected(.staleProcess))
+        XCTAssertEqual(driver.operations, ["validate-process"])
+    }
+
+    func test65RestoreSequenceAndRetryStayBoundToResolvedTarget() async {
+        let driver = FixtureDriver()
+        let clock = ManualActivationClock()
+        let coordinator = WindowActivationCoordinator(clock: clock) { _ in driver }
+        let result = coordinator.activate(window(minimized: true))
+
+        XCTAssertEqual(result.steps, [.targetResolved, .restored, .applicationActivated,
+            .focusedAndRaised, .retryScheduled])
+        XCTAssertEqual(driver.operations, ["resolve", "restore", "activate", "focus"])
+        clock.advance()
+        XCTAssertEqual(driver.operations,
+            ["resolve", "restore", "activate", "focus", "resolve", "restore", "activate", "focus"])
+    }
+
+    func test66SheetsDialogsAndUtilitiesFollowExplicitEvidencePolicy() async {
+        let dialog = WindowEligibilityContext(bundleIdentifier: "com.fixture", activationPolicy: .regular,
+            title: "Salvar", bounds: rect, layer: 3, alpha: 0, isOnScreen: false,
+            isHelperProcess: false, evidence: .accessibility,
+            accessibilitySubrole: kAXDialogSubrole as String)
+        XCTAssertEqual(WindowEligibilityPolicy.evaluate(dialog, includeUtilityWindows: false).reason, .dialog)
+
+        let sheet = WindowEligibilityContext(bundleIdentifier: "com.fixture", activationPolicy: .regular,
+            title: "Documento", bounds: rect, layer: 9, alpha: 0, isOnScreen: false,
+            isHelperProcess: false, evidence: .accessibility, accessibilitySubrole: "")
+        let sheetDecision = WindowEligibilityPolicy.evaluate(sheet, includeUtilityWindows: false)
+        XCTAssertTrue(sheetDecision.isEligible)
+        XCTAssertEqual(sheetDecision.reason, .standardWindow)
+
+        let utility = WindowEligibilityContext(bundleIdentifier: "com.fixture", activationPolicy: .accessory,
+            title: "Paleta", bounds: rect, layer: 8, alpha: 1, isOnScreen: true,
+            isHelperProcess: false, evidence: .accessibility,
+            accessibilitySubrole: kAXFloatingWindowSubrole as String)
+        XCTAssertEqual(WindowEligibilityPolicy.evaluate(utility, includeUtilityWindows: false).reason, .utilityDisabled)
+        XCTAssertEqual(WindowEligibilityPolicy.evaluate(utility, includeUtilityWindows: true).reason, .utility)
+
+        let (manager, _) = manager([window(), window(2)], [
+            ax(1, title: "Documento", subrole: "", role: kAXSheetRole as String),
+            ax(2, focused: true, title: "Salvar", subrole: kAXDialogSubrole as String)
+        ])
+        XCTAssertEqual(manager.windows.count, 2)
+        XCTAssertEqual(manager.frontmostWindow()?.windowServerID, 2)
+    }
+
+    func test67ProtectedContentWithoutThumbnailRemainsSelectableAndActivatable() async {
+        let protectedWindow = window(71, title: "Reprodução protegida", full: true,
+            mode: .activateApplication, bundle: "com.fixture.streaming")
+        XCTAssertNil(protectedWindow.icon)
+        let model = SwitcherViewModel()
+        model.present(windows: [window(), protectedWindow], selectedIndex: 1,
+            style: .preview, theme: .dark, size: .medium)
+        XCTAssertEqual(model.windows[model.selectedIndex].windowServerID, 71)
+
+        let driver = FixtureDriver()
+        let result = WindowActivationCoordinator(clock: ManualActivationClock()) { _ in driver }
+            .activate(protectedWindow)
+        XCTAssertTrue(result.succeeded)
+        XCTAssertEqual(driver.operations, ["resolve", "activate"])
+    }
+
+    func test68SettingsLocalWindowParticipatesAndUsesLocalActivation() async {
+        let source = FixtureSource()
+        var localActivationCount = 0
+        var externalActivationCount = 0
+        let settingsWindow = accessibilityWindow(identifier: "taber-settings", title: "Configurações",
+            pid: ProcessInfo.processInfo.processIdentifier, minimized: true)
+        let defaults = UserDefaults(suiteName: "com.taber.tests.\(UUID().uuidString)")!
+        let settings = SettingsStore(defaults: defaults)
+        let panel = SwitcherPanelController(); panel.model.isDemo = true
+        let monitor = GlobalShortcutMonitor(windowManager: WindowManager(source: source), settings: settings,
+            panelController: panel, initialState: .active, commandIsPressed: { true },
+            additionalWindows: { [settingsWindow] }, activateLocally: { selected in
+                guard selected.id == settingsWindow.id else { return false }
+                localActivationCount += 1
+                return true
+            }, activate: { _ in externalActivationCount += 1 })
+
+        monitor.beginOrAdvanceCycle(reverse: false)
+        XCTAssertEqual(panel.model.windows.map(\.id), [settingsWindow.id])
+        monitor.finishCycle()
+        XCTAssertEqual(localActivationCount, 1)
+        XCTAssertEqual(externalActivationCount, 0)
+    }
+
+    func test69TechnicalSystemSurfacesRemainExcluded() async {
+        for bundle in ["com.apple.dock", "com.apple.controlcenter", "com.apple.systemuiserver",
+                       "com.apple.WindowManager", "com.apple.notificationcenterui",
+                       "com.apple.TextInputSwitcher", "com.apple.AccessibilityVisualsAgent"] {
+            let context = WindowEligibilityContext(bundleIdentifier: bundle, activationPolicy: .regular,
+                title: "Painel", bounds: rect, layer: 0, alpha: 1, isOnScreen: true,
+                isHelperProcess: false, evidence: .accessibility,
+                accessibilitySubrole: kAXStandardWindowSubrole as String)
+            let decision = WindowEligibilityPolicy.evaluate(context, includeUtilityWindows: true)
+            XCTAssertFalse(decision.isEligible, bundle)
+            XCTAssertEqual(decision.reason, .systemShell, bundle)
+        }
+    }
+
+    func test70DisabledEventTapCancelsCycleWithoutCommittingSelection() async {
+        let source = FixtureSource()
+        source.raw = [window(), window(2)]
+        source.ax = [ax(1, focused: true), ax(2)]
+        var activations = 0
+        let defaults = UserDefaults(suiteName: "com.taber.tests.\(UUID().uuidString)")!
+        let settings = SettingsStore(defaults: defaults)
+        let panel = SwitcherPanelController(); panel.model.isDemo = true
+        let monitor = GlobalShortcutMonitor(windowManager: WindowManager(source: source), settings: settings,
+            panelController: panel, initialState: .active, commandIsPressed: { true },
+            activate: { _ in activations += 1 })
+
+        monitor.beginOrAdvanceCycle(reverse: false)
+        monitor.handleEventTapDisabled()
+        monitor.finishCycle()
+        XCTAssertEqual(activations, 0)
+    }
+
+    func test71CommandReleaseWatchdogFinishesLostCommandUp() async throws {
+        let source = FixtureSource()
+        source.raw = [window(), window(2)]
+        source.ax = [ax(1, focused: true), ax(2)]
+        var activated: WindowInfo?
+        let defaults = UserDefaults(suiteName: "com.taber.tests.\(UUID().uuidString)")!
+        let settings = SettingsStore(defaults: defaults)
+        let panel = SwitcherPanelController(); panel.model.isDemo = true
+        let monitor = GlobalShortcutMonitor(windowManager: WindowManager(source: source), settings: settings,
+            panelController: panel, initialState: .active, commandIsPressed: { false },
+            activate: { activated = $0 })
+
+        monitor.beginOrAdvanceCycle(reverse: false)
+        try await Task.sleep(for: .milliseconds(260))
+        XCTAssertEqual(activated?.windowServerID, 2)
+    }
+
+    func test72OverlayCallbackRunsOncePerCycleBeforePresentation() async {
+        let source = FixtureSource()
+        source.raw = [window(), window(2)]
+        var callbacks = 0
+        let (monitor, _, _) = monitor(source)
+        monitor.onCycleWillStart = { callbacks += 1 }
+
+        monitor.beginOrAdvanceCycle(reverse: false)
+        monitor.beginOrAdvanceCycle(reverse: false)
+        XCTAssertEqual(callbacks, 1)
+        monitor.cancelCycle()
+        monitor.beginOrAdvanceCycle(reverse: false)
+        XCTAssertEqual(callbacks, 2)
+        monitor.cancelCycle()
+    }
+
+    func test73IndistinguishableCGOnlySurfacesCollapseToOneApplicationTarget() async {
+        let source = FixtureSource()
+        source.raw = [window(title: ""), window(2, title: "")]
+        source.ax = []
+        let manager = WindowManager(source: source)
+
+        manager.refresh()
+
+        XCTAssertEqual(manager.windows.count, 1,
+            "Superfícies sem identidade individual defensável devem representar um único alvo de aplicativo")
+        XCTAssertEqual(manager.windows.first?.activationMode, .activateApplication)
+    }
+
     func test33RepeatablePerformanceFixture() async {
         let source = FixtureSource()
         source.raw = (1...200).map { window(UInt32($0)) }
         source.ax = (1...200).map { ax(UInt32($0), focused: $0 == 1) }
         let manager = WindowManager(source: source)
         let model = SwitcherViewModel()
-        manager.refresh()
-        let start = ProcessInfo.processInfo.systemUptime
+        for _ in 0..<3 { manager.refresh() }
         let cpu = clock()
-        for _ in 0..<40 {
-            manager.refresh()
-            model.present(windows: manager.windows, selectedIndex: 1, style: .icons, theme: .original, size: .medium)
+        var refreshSamplesMilliseconds: [Double] = []
+        // A baseline 1.1.0 foi obtida com lotes de 40 varreduras + apresentação.
+        // Medir cinco lotes iguais e comparar a mediana mantém a série histórica
+        // comparável e reduz falsos positivos por uma única amostra ruidosa.
+        for _ in 0..<5 {
+            let start = ProcessInfo.processInfo.systemUptime
+            for _ in 0..<40 {
+                manager.refresh()
+                model.present(windows: manager.windows, selectedIndex: 1,
+                    style: .icons, theme: .original, size: .medium)
+            }
+            refreshSamplesMilliseconds.append(
+                (ProcessInfo.processInfo.systemUptime - start) / 40 * 1_000
+            )
         }
-        let elapsed = ProcessInfo.processInfo.systemUptime - start
+        let medianRefreshMilliseconds = refreshSamplesMilliseconds.sorted()[refreshSamplesMilliseconds.count / 2]
+        let baselineRefreshMilliseconds = 5.568
+        let maximumAcceptedRefreshMilliseconds = baselineRefreshMilliseconds * 1.10
         let navigationStart = ProcessInfo.processInfo.systemUptime
         for i in 0..<10000 { model.select(index: i % 200) }
         var usage = rusage()
         getrusage(RUSAGE_SELF, &usage)
-        print("TABER_PERF refresh200_ms=\(elapsed / 40 * 1000) navigation10000_ms=\((ProcessInfo.processInfo.systemUptime - navigationStart) * 1000) cpu_ms=\(Double(clock() - cpu) / Double(CLOCKS_PER_SEC) * 1000) peakRSS_bytes=\(usage.ru_maxrss)")
+        print("TABER_PERF refresh200_median_ms=\(medianRefreshMilliseconds) baseline_ms=\(baselineRefreshMilliseconds) limit_ms=\(maximumAcceptedRefreshMilliseconds) samples_ms=\(refreshSamplesMilliseconds) navigation10000_ms=\((ProcessInfo.processInfo.systemUptime - navigationStart) * 1000) cpu_ms=\(Double(clock() - cpu) / Double(CLOCKS_PER_SEC) * 1000) peakRSS_bytes=\(usage.ru_maxrss)")
         XCTAssertEqual(manager.windows.count, 200)
+        XCTAssertLessThanOrEqual(medianRefreshMilliseconds, maximumAcceptedRefreshMilliseconds,
+            "A mediana repetível de descoberta com 200 janelas regrediu mais de 10% contra a baseline documentada")
     }
 }

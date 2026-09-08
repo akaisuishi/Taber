@@ -142,6 +142,8 @@ struct QuickSettingsView: View {
                 Picker("Tema", selection: $settings.appTheme) { ForEach(AppTheme.allCases) { Text($0.title).tag($0) } }
                 Picker("Tamanho", selection: $settings.switcherSize) { ForEach(SwitcherSize.allCases) { Text($0.title).tag($0) } }
                 Toggle("Transparência", isOn: $settings.transparencyEnabled)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
                     .accessibilityIdentifier("quick.transparency")
             }.pickerStyle(.menu).font(.system(size: 12))
             if monitor.state == .needsAccessibility || monitor.state == .failed {

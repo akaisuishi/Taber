@@ -34,6 +34,12 @@ final class TaberUITests: XCTestCase {
             let button = app.buttons["settings.section.\(section)"]
             XCTAssertTrue(button.exists); button.click()
         }
+        app.buttons["settings.section.appearance"].click()
+        let transparency = app.descendants(matching: .any)
+            .matching(identifier: "appearance.transparency").firstMatch
+        XCTAssertTrue(transparency.waitForExistence(timeout: 2))
+        XCTAssertTrue(transparency.isHittable)
+        transparency.click()
         app.typeKey("w", modifierFlags: .command)
         XCTAssertFalse(app.windows["Taber"].exists)
         XCTAssertEqual(app.state, .runningForeground)

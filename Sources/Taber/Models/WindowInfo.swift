@@ -41,19 +41,24 @@ struct WindowInfo: Identifiable, Hashable {
     let processLaunchDate: Date?
     let activationPID: pid_t
     let activationProcessLaunchDate: Date?
-    let bundleIdentifier: String, applicationName: String, title: String
+    let bundleIdentifier: String, applicationName: String
+    private(set) var title: String
     let bounds: CGRect
-    let isOnScreen: Bool, isMinimized: Bool, isFullScreen: Bool
-    let activationMode: WindowActivationMode
-    let spaceIdentifier: UInt64?, spaceNumber: Int?
-    let spaceLocations: [SpaceLocation]
-    let isOnAllDesktops: Bool
+    let isOnScreen: Bool
+    private(set) var isMinimized: Bool
+    private(set) var isFullScreen: Bool
+    private(set) var activationMode: WindowActivationMode
+    private(set) var spaceIdentifier: UInt64?
+    private(set) var spaceNumber: Int?
+    private(set) var spaceLocations: [SpaceLocation]
+    private(set) var isOnAllDesktops: Bool
     let screenName: String
     let icon: NSImage?
-    let accessibilityIdentifier: String
-    let accessibilityOrdinal: Int?
-    let isAccessibilityFocused: Bool
-    let titleOccurrence: Int?, titleOccurrenceCount: Int
+    private(set) var accessibilityIdentifier: String
+    private(set) var accessibilityOrdinal: Int?
+    private(set) var isAccessibilityFocused: Bool
+    private(set) var titleOccurrence: Int?
+    private(set) var titleOccurrenceCount: Int
 
     init(id: CGWindowID, ownerPID: pid_t, bundleIdentifier: String, applicationName: String,
          title: String, bounds: CGRect, isOnScreen: Bool, isMinimized: Bool,
@@ -113,33 +118,38 @@ struct WindowInfo: Identifiable, Hashable {
         guard titleOccurrenceCount > 1, let titleOccurrence else { return base }; return "\(base) · Janela \(titleOccurrence)"
     }
 
-    private func rebuilt(title: String? = nil, minimized: Bool? = nil, fullScreen: Bool? = nil,
-                         mode: WindowActivationMode? = nil, axIdentifier: String? = nil,
-                         axOrdinal: Int? = nil, focused: Bool? = nil, occurrence: Int? = nil,
-                         occurrenceCount: Int? = nil, resolved: ResolvedWindowSpace? = nil,
-                         replaceSpace: Bool = false) -> WindowInfo {
-        WindowInfo(identity: id, windowServerID: windowServerID, ownerPID: ownerPID,
-            bundleIdentifier: bundleIdentifier, applicationName: applicationName, title: title ?? self.title,
-            bounds: bounds, isOnScreen: isOnScreen, isMinimized: minimized ?? isMinimized,
-            isFullScreen: fullScreen ?? (isFullScreen || (resolved?.isFullScreen ?? false)), activationMode: mode ?? activationMode,
-            spaceIdentifier: replaceSpace ? resolved?.identifier : spaceIdentifier,
-            spaceNumber: replaceSpace ? resolved?.number : spaceNumber, screenName: screenName, icon: icon,
-            accessibilityIdentifier: axIdentifier ?? accessibilityIdentifier,
-            accessibilityOrdinal: axOrdinal ?? accessibilityOrdinal, isAccessibilityFocused: focused ?? isAccessibilityFocused,
-            titleOccurrence: occurrence ?? titleOccurrence, titleOccurrenceCount: occurrenceCount ?? titleOccurrenceCount,
-            processLaunchDate: processLaunchDate, spaceLocations: replaceSpace ? (resolved?.locations ?? []) : spaceLocations,
-            isOnAllDesktops: replaceSpace ? (resolved?.isOnAllDesktops ?? false) : isOnAllDesktops,
-            activationPID: activationPID, activationProcessLaunchDate: activationProcessLaunchDate)
-    }
     func withAccessibilityIdentity(identifier: String, ordinal: Int, accessibilityTitle: String,
         isMinimized: Bool, isFullScreen: Bool, isFocused: Bool, activationMode: WindowActivationMode? = nil) -> WindowInfo {
-        rebuilt(title: accessibilityTitle.isEmpty ? title : accessibilityTitle, minimized: isMinimized,
-                fullScreen: isFullScreen, mode: activationMode, axIdentifier: identifier,
-                axOrdinal: ordinal, focused: isFocused)
+        var copy = self
+        if !accessibilityTitle.isEmpty { copy.title = accessibilityTitle }
+        copy.isMinimized = isMinimized
+        copy.isFullScreen = isFullScreen
+        if let activationMode { copy.activationMode = activationMode }
+        copy.accessibilityIdentifier = identifier
+        copy.accessibilityOrdinal = ordinal
+        copy.isAccessibilityFocused = isFocused
+        return copy
     }
-    func withTitleOccurrence(_ occurrence: Int, count: Int) -> WindowInfo { rebuilt(occurrence: occurrence, occurrenceCount: count) }
-    func withResolvedSpace(_ resolvedSpace: ResolvedWindowSpace?) -> WindowInfo { rebuilt(resolved: resolvedSpace, replaceSpace: true) }
-    func withActivationMode(_ mode: WindowActivationMode) -> WindowInfo { rebuilt(mode: mode) }
+    func withTitleOccurrence(_ occurrence: Int, count: Int) -> WindowInfo {
+        var copy = self
+        copy.titleOccurrence = occurrence
+        copy.titleOccurrenceCount = count
+        return copy
+    }
+    func withResolvedSpace(_ resolvedSpace: ResolvedWindowSpace?) -> WindowInfo {
+        var copy = self
+        copy.spaceIdentifier = resolvedSpace?.identifier
+        copy.spaceNumber = resolvedSpace?.number
+        copy.spaceLocations = resolvedSpace?.locations ?? []
+        copy.isOnAllDesktops = resolvedSpace?.isOnAllDesktops ?? false
+        copy.isFullScreen = isFullScreen || (resolvedSpace?.isFullScreen ?? false)
+        return copy
+    }
+    func withActivationMode(_ mode: WindowActivationMode) -> WindowInfo {
+        var copy = self
+        copy.activationMode = mode
+        return copy
+    }
     static func == (lhs: WindowInfo, rhs: WindowInfo) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }

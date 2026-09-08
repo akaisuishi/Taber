@@ -142,6 +142,14 @@ enum TaberDesign {
     static let transitionDuration = 0.15
 }
 
+/// Mantém a precedência da preferência de acessibilidade verificável sem
+/// depender do estado global do Mac que está executando os testes.
+enum TaberTransparencyPolicy {
+    static func isEffective(userEnabled: Bool, reduceTransparency: Bool) -> Bool {
+        userEnabled && !reduceTransparency
+    }
+}
+
 struct TaberSurfaceBackground: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.taberTransparencyEnabled) private var transparencyEnabled
@@ -150,7 +158,10 @@ struct TaberSurfaceBackground: View {
     var tintOpacity: Double = 0.72
 
     var usesTransparency: Bool {
-        transparencyEnabled && !reduceTransparency
+        TaberTransparencyPolicy.isEffective(
+            userEnabled: transparencyEnabled,
+            reduceTransparency: reduceTransparency
+        )
     }
 
     var body: some View {
