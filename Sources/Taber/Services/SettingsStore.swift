@@ -11,6 +11,7 @@ final class SettingsStore: ObservableObject {
         static let appTheme = "appTheme"
         static let searchShortcut = "searchShortcut"
         static let keepSearchOpen = "keepSearchOpen"
+        static let transparencyEnabled = "transparencyEnabled"
     }
 
     private let defaults: UserDefaults
@@ -47,12 +48,17 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(keepSearchOpen, forKey: Keys.keepSearchOpen) }
     }
 
+    @Published var transparencyEnabled: Bool {
+        didSet { defaults.set(transparencyEnabled, forKey: Keys.transparencyEnabled) }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         settingsSection = defaults.string(forKey: "settingsSection") ?? "appearance"
         shortcutEnabled = defaults.object(forKey: Keys.shortcutEnabled) as? Bool ?? true
         includeUtilityWindows = defaults.object(forKey: Keys.includeUtilityWindows) as? Bool ?? false
         keepSearchOpen = defaults.object(forKey: Keys.keepSearchOpen) as? Bool ?? true
+        transparencyEnabled = defaults.object(forKey: Keys.transparencyEnabled) as? Bool ?? false
 
         if let rawValue = defaults.string(forKey: Keys.switcherStyle),
            let style = SwitcherStyle(rawValue: rawValue) {

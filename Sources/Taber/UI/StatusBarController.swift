@@ -141,6 +141,8 @@ struct QuickSettingsView: View {
             VStack(spacing: 14) {
                 Picker("Tema", selection: $settings.appTheme) { ForEach(AppTheme.allCases) { Text($0.title).tag($0) } }
                 Picker("Tamanho", selection: $settings.switcherSize) { ForEach(SwitcherSize.allCases) { Text($0.title).tag($0) } }
+                Toggle("Transparência", isOn: $settings.transparencyEnabled)
+                    .accessibilityIdentifier("quick.transparency")
             }.pickerStyle(.menu).font(.system(size: 12))
             if monitor.state == .needsAccessibility || monitor.state == .failed {
                 Button(action: onOpenSettings) { Label("Revisar permissões", systemImage: "exclamationmark.circle") }
@@ -155,8 +157,9 @@ struct QuickSettingsView: View {
         }
         .padding(20).frame(width: 320)
         .foregroundStyle(palette.primary).tint(palette.accent)
-        .background(TaberSurfaceBackground(color: palette.panel))
+        .background(TaberSurfaceBackground(color: palette.panel, tintOpacity: settings.appTheme.transparencyTintOpacity))
         .environment(\.taberThemePalette, palette)
+        .environment(\.taberTransparencyEnabled, settings.transparencyEnabled)
         .preferredColorScheme(settings.appTheme.colorScheme)
         .environment(\.colorScheme, settings.appTheme.colorScheme)
         .onExitCommand(perform: onDismiss)

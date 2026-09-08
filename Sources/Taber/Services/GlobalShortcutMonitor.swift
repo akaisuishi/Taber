@@ -370,6 +370,7 @@ final class GlobalShortcutMonitor: ObservableObject {
                 style: settings.switcherStyle,
                 theme: settings.appTheme,
                 size: settings.switcherSize,
+                transparencyEnabled: settings.transparencyEnabled,
                 keepSearchOpen: settings.keepSearchOpen
             )
             scheduleCommandReleaseWatchdog()

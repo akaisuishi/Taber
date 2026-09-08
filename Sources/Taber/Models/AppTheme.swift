@@ -38,6 +38,12 @@ enum AppTheme: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Tint sobre o material nativo. O tema claro precisa de um pouco mais de
+    /// cobertura para preservar contraste sobre conteúdo luminoso.
+    var transparencyTintOpacity: Double {
+        self == .light ? 0.82 : 0.72
+    }
+
     var palette: TaberThemePalette {
         switch self {
         case .original:
@@ -114,10 +120,20 @@ private struct TaberThemePaletteKey: EnvironmentKey {
     static let defaultValue = AppTheme.original.palette
 }
 
+private struct TaberTransparencyEnabledKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
     var taberThemePalette: TaberThemePalette {
         get { self[TaberThemePaletteKey.self] }
         set { self[TaberThemePaletteKey.self] = newValue }
+    }
+
+
+    var taberTransparencyEnabled: Bool {
+        get { self[TaberTransparencyEnabledKey.self] }
+        set { self[TaberTransparencyEnabledKey.self] = newValue }
     }
 }
 
@@ -128,12 +144,19 @@ enum TaberDesign {
 
 struct TaberSurfaceBackground: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.taberTransparencyEnabled) private var transparencyEnabled
     let color: Color
     var material: NSVisualEffectView.Material = .popover
+    var tintOpacity: Double = 0.72
+
+    var usesTransparency: Bool {
+        transparencyEnabled && !reduceTransparency
+    }
+
     var body: some View {
         ZStack {
-            if !reduceTransparency { TaberMaterial(material: material) }
-            color.opacity(reduceTransparency ? 1 : 0.94)
+            if usesTransparency { TaberMaterial(material: material) }
+            color.opacity(usesTransparency ? tintOpacity : 1)
         }
     }
 }

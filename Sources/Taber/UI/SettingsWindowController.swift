@@ -1,10 +1,12 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
 final class SettingsWindowController: NSWindowController {
     private let onWindowStateChange: (NSWindow?) -> Void
     private let onDismissPreview: () -> Void
+    private var cancellables = Set<AnyCancellable>()
 
     init(
         settings: SettingsStore,
@@ -34,6 +36,20 @@ final class SettingsWindowController: NSWindowController {
         window.center()
         super.init(window: window)
         window.delegate = self
+
+        settings.$transparencyEnabled
+            .removeDuplicates()
+            .sink { [weak self] enabled in self?.applyWindowTransparency(preferenceEnabled: enabled) }
+            .store(in: &cancellables)
+        NSWorkspace.shared.notificationCenter.publisher(
+            for: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification
+        )
+        .sink { [weak self, weak settings] _ in
+            guard let settings else { return }
+            self?.applyWindowTransparency(preferenceEnabled: settings.transparencyEnabled)
+        }
+        .store(in: &cancellables)
+        applyWindowTransparency(preferenceEnabled: settings.transparencyEnabled)
     }
 
     @available(*, unavailable)
@@ -67,6 +83,14 @@ final class SettingsWindowController: NSWindowController {
             return
         }
         onWindowStateChange(window)
+    }
+
+    private func applyWindowTransparency(preferenceEnabled: Bool) {
+        guard let window else { return }
+        let effective = preferenceEnabled
+            && !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        window.isOpaque = !effective
+        window.backgroundColor = effective ? .clear : .windowBackgroundColor
     }
 }
 

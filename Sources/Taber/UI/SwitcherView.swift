@@ -15,12 +15,13 @@ struct SwitcherView: View {
             else { sequence }
             footer
         }
-        .background(TaberSurfaceBackground(color: palette.panel))
+        .background(TaberSurfaceBackground(color: palette.panel, tintOpacity: model.theme.transparencyTintOpacity))
         .clipShape(RoundedRectangle(cornerRadius: metrics.panelCornerRadius))
         .overlay { RoundedRectangle(cornerRadius: metrics.panelCornerRadius).stroke(palette.border) }
         .padding(metrics.panelOuterPadding)
         .foregroundStyle(palette.primary)
         .environment(\.taberThemePalette, palette)
+        .environment(\.taberTransparencyEnabled, model.transparencyEnabled)
         .preferredColorScheme(model.theme.colorScheme)
         .accessibilityIdentifier("switcher.panel")
     }

@@ -67,13 +67,14 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .background(palette.background)
+        .background(TaberSurfaceBackground(color: palette.background, material: .windowBackground, tintOpacity: settings.appTheme.transparencyTintOpacity))
         .foregroundStyle(palette.primary)
         .font(.system(size: 13))
         .tint(palette.accent)
         .preferredColorScheme(settings.appTheme.colorScheme)
         .environment(\.colorScheme, settings.appTheme.colorScheme)
         .environment(\.taberThemePalette, palette)
+        .environment(\.taberTransparencyEnabled, settings.transparencyEnabled)
         .frame(minWidth: 780, minHeight: 580)
         .onAppear { launchAtLogin = LaunchAtLoginService.isEnabled }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -169,6 +170,11 @@ struct SettingsView: View {
                         ForEach(SwitcherSize.allCases) { Text($0.title).tag($0) }
                     }.pickerStyle(.segmented).labelsHidden().accessibilityIdentifier("appearance.size")
                 }
+            }
+            row("Transparência", "Usa o material do macOS no alternador, painel rápido e Configurações. A opção Reduzir Transparência sempre prevalece.") {
+                Toggle("Transparência", isOn: $settings.transparencyEnabled)
+                    .labelsHidden()
+                    .accessibilityIdentifier("appearance.transparency")
             }
         }
     }

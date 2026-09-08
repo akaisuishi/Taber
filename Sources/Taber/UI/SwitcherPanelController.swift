@@ -9,6 +9,7 @@ final class SwitcherViewModel: ObservableObject {
     @Published private(set) var style: SwitcherStyle = .preview
     @Published private(set) var theme: AppTheme = .original
     @Published private(set) var size: SwitcherSize = .medium
+    @Published private(set) var transparencyEnabled = false
     @Published private(set) var searchQuery = ""
     @Published private(set) var isSearching = false
     @Published private(set) var isSearchDetached = false
@@ -21,7 +22,8 @@ final class SwitcherViewModel: ObservableObject {
         selectedIndex: Int,
         style: SwitcherStyle,
         theme: AppTheme,
-        size: SwitcherSize
+        size: SwitcherSize,
+        transparencyEnabled: Bool = false
     ) {
         thumbnailGeneration &+= 1
         self.windows = windows
@@ -29,6 +31,7 @@ final class SwitcherViewModel: ObservableObject {
         self.style = style
         self.theme = theme
         self.size = size
+        self.transparencyEnabled = transparencyEnabled
         searchQuery = ""
         isSearching = false
         isSearchDetached = false
@@ -97,6 +100,7 @@ final class SwitcherPanelController {
         style: SwitcherStyle,
         theme: AppTheme,
         size: SwitcherSize,
+        transparencyEnabled: Bool = false,
         isDemo: Bool = false,
         keepSearchOpen: Bool = true
     ) {
@@ -115,7 +119,8 @@ final class SwitcherPanelController {
             selectedIndex: selectedIndex,
             style: style,
             theme: theme,
-            size: size
+            size: size,
+            transparencyEnabled: transparencyEnabled
         )
         panel.level = .statusBar
         panel.orderFrontRegardless()

@@ -144,6 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             style: style,
             theme: settings.appTheme,
             size: settings.switcherSize,
+            transparencyEnabled: settings.transparencyEnabled,
             isDemo: true
         )
 
