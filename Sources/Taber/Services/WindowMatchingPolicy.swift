@@ -3,6 +3,20 @@ import Darwin
 import Foundation
 
 enum WindowMatchingPolicy {
+    enum ActivationStrategy: String, Equatable {
+        case accessibilityWindow
+        case application
+        case localWindow
+    }
+
+    static func activationStrategy(
+        usesApplicationOnlyActivation: Bool,
+        hasRegisteredLocalTarget: Bool
+    ) -> ActivationStrategy {
+        if hasRegisteredLocalTarget { return .localWindow }
+        return usesApplicationOnlyActivation ? .application : .accessibilityWindow
+    }
+
     static func shouldReconcileWithAccessibility(
         candidateCount: Int,
         containsOffscreenWindow: Bool,
@@ -67,6 +81,32 @@ enum WindowMatchingPolicy {
             candidateIdentifiers[$0] == targetIdentifier
         }
         return matches.count == 1 ? matches[0] : nil
+    }
+
+    /// Process identity must survive a refresh between displaying the
+    /// switcher and committing the selection. PID reuse alone is not enough:
+    /// when available, bundle identifier and launch date are both checked.
+    static func representsSameProcess(
+        expectedPID: pid_t,
+        expectedBundleIdentifier: String,
+        expectedLaunchDate: Date?,
+        actualPID: pid_t,
+        actualBundleIdentifier: String?,
+        actualLaunchDate: Date?
+    ) -> Bool {
+        guard expectedPID == actualPID else { return false }
+        if !expectedBundleIdentifier.isEmpty,
+           let actualBundleIdentifier,
+           !actualBundleIdentifier.isEmpty,
+           expectedBundleIdentifier != actualBundleIdentifier {
+            return false
+        }
+        if let expectedLaunchDate {
+            guard let actualLaunchDate, expectedLaunchDate == actualLaunchDate else {
+                return false
+            }
+        }
+        return true
     }
 
     static func preferredFrontmostIndex(

@@ -72,7 +72,7 @@ final class SwitcherPanelController {
             backing: .buffered,
             defer: false
         )
-        panel.level = .statusBar
+        panel.level = .normal
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -100,6 +100,10 @@ final class SwitcherPanelController {
         isDemo: Bool = false,
         keepSearchOpen: Bool = true
     ) {
+        // A demo e o ciclo real compartilham o mesmo painel. Encerrar a
+        // apresentação anterior antes de publicar o novo modelo evita que
+        // callbacks atrasados da demo escondam um ciclo real.
+        panel.orderOut(nil)
         model.isDemo = isDemo
         model.keepSearchOpen = keepSearchOpen
         if !isDemo { WindowThumbnailService.shared.beginPresentation() }
@@ -113,6 +117,7 @@ final class SwitcherPanelController {
             theme: theme,
             size: size
         )
+        panel.level = .statusBar
         panel.orderFrontRegardless()
     }
 
@@ -169,10 +174,16 @@ final class SwitcherPanelController {
 
     func hide() {
         panel.orderOut(nil)
+        panel.level = .normal
+        model.isDemo = false
     }
 
     func hideDemo() {
         if model.isDemo { hide() }
+    }
+
+    var isShowingDemo: Bool {
+        panel.isVisible && model.isDemo
     }
 
     private func resizeAndCenter(

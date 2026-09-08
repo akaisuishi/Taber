@@ -67,7 +67,10 @@ final class WindowThumbnailService {
         }
 
         do {
-            guard let captureWindow = try await shareableWindow(withID: window.id) else {
+            guard let windowServerID = window.windowServerID else {
+                return .unavailable
+            }
+            guard let captureWindow = try await shareableWindow(withID: windowServerID) else {
                 logger.notice("Janela \(window.id) não foi disponibilizada pelo ScreenCaptureKit")
                 return .unavailable
             }

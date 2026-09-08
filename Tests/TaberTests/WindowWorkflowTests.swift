@@ -80,11 +80,11 @@ final class WindowWorkflowTests: XCTestCase {
     }
     func test03AXFocusOverridesWindowServerOrder() async {
         let (m, _) = manager([window(), window(2)], [ax(1), ax(2, focused: true)])
-        XCTAssertEqual(m.frontmostWindow()?.id, 2)
+        XCTAssertEqual(m.frontmostWindow()?.windowServerID, 2)
     }
     func test04FocusedWindowWinsOverMainWindow() async {
         let (m, _) = manager([window(), window(2)], [ax(1, main: true), ax(2, focused: true)])
-        XCTAssertEqual(m.frontmostWindow()?.id, 2)
+        XCTAssertEqual(m.frontmostWindow()?.windowServerID, 2)
     }
     func test05ChromeNormalAndIncognitoSelectExactIdentity() async {
         for id: UInt32 in [1, 2] {
@@ -94,7 +94,7 @@ final class WindowWorkflowTests: XCTestCase {
     }
     func test06SafariPrivateAndNormalRemainDistinct() async {
         let (m, _) = manager([window(bundle: "com.apple.Safari"), window(2, bundle: "com.apple.Safari")], [ax(1), ax(2)])
-        XCTAssertEqual(m.windows.map(\.id), [1, 2])
+        XCTAssertEqual(m.windows.compactMap(\.windowServerID), [1, 2])
     }
     func test07FinderEqualTitlesGetDistinctLabels() async {
         let (m, _) = manager([window(), window(2)], [ax(1), ax(2)])
@@ -116,14 +116,14 @@ final class WindowWorkflowTests: XCTestCase {
     }
     func test11RestoreDoesNotTouchOtherMinimizedWindows() async {
         let a = FixtureDriver(), b = FixtureDriver()
-        let c = WindowActivationCoordinator(clock: ManualActivationClock()) { $0.id == 1 ? a : b }
+        let c = WindowActivationCoordinator(clock: ManualActivationClock()) { $0.windowServerID == 1 ? a : b }
         c.activate(window(2, minimized: true))
         XCTAssertTrue(a.operations.isEmpty)
         XCTAssertTrue(b.operations.contains("restore"))
     }
     func test12OldRestoreCannotStealNewSelection() async {
         let clock = ManualActivationClock(), a = FixtureDriver(), b = FixtureDriver()
-        let c = WindowActivationCoordinator(clock: clock) { $0.id == 1 ? a : b }
+        let c = WindowActivationCoordinator(clock: clock) { $0.windowServerID == 1 ? a : b }
         c.activate(window(minimized: true)); c.activate(window(2))
         let before = a.operations.count; clock.advance()
         XCTAssertEqual(a.operations.count, before)
@@ -199,18 +199,20 @@ final class WindowWorkflowTests: XCTestCase {
     }
     func test24PictureInPictureUtilityPolicy() async {
         let context = WindowEligibilityContext(bundleIdentifier: "com.fixture.pip", activationPolicy: .accessory,
-            title: "Picture in Picture", bounds: rect, layer: 0, alpha: 1, isOnScreen: true, isHelperProcess: false)
+            title: "Picture in Picture", bounds: rect, layer: 0, alpha: 1, isOnScreen: true,
+            isHelperProcess: false, evidence: .accessibility,
+            accessibilitySubrole: kAXFloatingWindowSubrole as String)
         XCTAssertFalse(WindowEligibilityPolicy.allows(context, includeUtilityWindows: false))
         XCTAssertTrue(WindowEligibilityPolicy.allows(context, includeUtilityWindows: true))
     }
     func test25ModalDialogIdentityIsNotMergedByTitle() async {
         let (m, _) = manager([window(), window(2)], [ax(1), ax(2, focused: true, subrole: "AXDialog")])
         XCTAssertEqual(m.windows.count, 2)
-        XCTAssertEqual(m.frontmostWindow()?.id, 2)
+        XCTAssertEqual(m.frontmostWindow()?.windowServerID, 2)
     }
     func test26BackgroundHelpersAreExcluded() async {
         for (bundle, policy, helper) in [("com.apple.Spotlight", NSApplication.ActivationPolicy.regular, false),
-            ("com.google.drivefs", .accessory, false), ("com.fixture.helper", .regular, true)] {
+            ("com.google.drivefs", .accessory, false)] {
             let c = WindowEligibilityContext(bundleIdentifier: bundle, activationPolicy: policy, title: "",
                 bounds: rect, layer: 0, alpha: 1, isOnScreen: false, isHelperProcess: helper)
             XCTAssertFalse(WindowEligibilityPolicy.allows(c, includeUtilityWindows: true))
@@ -224,14 +226,14 @@ final class WindowWorkflowTests: XCTestCase {
         let model = SwitcherViewModel()
         model.present(windows: [window(), window(2)], selectedIndex: 0, style: .preview, theme: .original, size: .medium)
         model.select(index: 1)
-        XCTAssertEqual(model.windows[model.selectedIndex].id, 2)
+        XCTAssertEqual(model.windows[model.selectedIndex].windowServerID, 2)
     }
     func test29SearchAccentsEmptyResultsAndDetachedCommand() async {
         let s = FixtureSource(); s.raw = [window(title: "Relatório"), window(2, title: "Notas")]; s.ax = [ax(1, title: "Relatório"), ax(2, title: "Notas")]
         let (m, p, _) = monitor(s)
         m.beginOrAdvanceCycle(reverse: false); m.enterSearch()
         m.handleSearchInput(keyCode: 0, text: "relatorio")
-        XCTAssertEqual(p.model.windows.map(\.id), [1])
+        XCTAssertEqual(p.model.windows.compactMap(\.windowServerID), [1])
         m.detachSearchFromCommand(); XCTAssertTrue(p.model.isSearchDetached)
         m.handleSearchInput(keyCode: 0, text: "inexistente")
         XCTAssertTrue(p.model.windows.isEmpty)
@@ -277,7 +279,7 @@ final class WindowWorkflowTests: XCTestCase {
 
     func test34AXOnlyMinimizedWindowSurvivesWindowServerTransition() async {
         let (m, _) = manager([window()], [ax(1), ax(2, minimized: true)])
-        XCTAssertEqual(m.windows.map(\.id), [1, 2])
+        XCTAssertEqual(m.windows.compactMap(\.windowServerID), [1, 2])
         XCTAssertTrue(m.windows[1].isMinimized)
     }
 

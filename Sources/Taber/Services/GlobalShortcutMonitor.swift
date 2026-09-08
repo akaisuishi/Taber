@@ -58,7 +58,7 @@ private func taberEventTapCallback(
     let monitor = Unmanaged<GlobalShortcutMonitor>.fromOpaque(userInfo).takeUnretainedValue()
 
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-        DispatchQueue.main.async { monitor.reenableEventTap() }
+        DispatchQueue.main.async { monitor.handleEventTapDisabled() }
         return Unmanaged.passUnretained(event)
     }
 
@@ -176,6 +176,7 @@ final class GlobalShortcutMonitor: ObservableObject {
     private var isCycling = false
     private var searchQuery = ""
     private var lastSearchShiftPress: TimeInterval?
+    private var commandReleaseWatchdog: DispatchWorkItem?
     nonisolated(unsafe) fileprivate private(set) var isCycleActiveForEventTap = false
     nonisolated(unsafe) fileprivate private(set) var isSearchActiveForEventTap = false
     nonisolated(unsafe) fileprivate private(set) var isSearchDetachedForEventTap = false
@@ -186,16 +187,28 @@ final class GlobalShortcutMonitor: ObservableObject {
     private let logger = Logger(subsystem: "com.taber.app", category: "shortcut")
     private let now: () -> TimeInterval
     private let activate: (WindowInfo) -> Void
+    private let additionalWindows: () -> [WindowInfo]
+    private let activateLocally: (WindowInfo) -> Bool
+    private let commandIsPressed: () -> Bool
+    var onCycleWillStart: () -> Void = {}
 
     init(windowManager: WindowManager, settings: SettingsStore, panelController: SwitcherPanelController,
          initialState: ShortcutMonitorState = .disabled,
          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         commandIsPressed: @escaping () -> Bool = {
+             CGEventSource.flagsState(.combinedSessionState).contains(.maskCommand)
+         },
+         additionalWindows: @escaping () -> [WindowInfo] = { [] },
+         activateLocally: @escaping (WindowInfo) -> Bool = { _ in false },
          activate: ((WindowInfo) -> Void)? = nil) {
         self.windowManager = windowManager
         self.settings = settings
         self.panelController = panelController
         self.state = initialState
         self.now = now
+        self.commandIsPressed = commandIsPressed
+        self.additionalWindows = additionalWindows
+        self.activateLocally = activateLocally
         self.activate = activate ?? { windowManager.activate($0) }
         searchShortcutForEventTap = settings.searchShortcut
         keepSearchOpenForEventTap = settings.keepSearchOpen
@@ -319,14 +332,27 @@ final class GlobalShortcutMonitor: ObservableObject {
         state = .active
     }
 
+    func handleEventTapDisabled() {
+        // Um tap desabilitado pode consumir o Command-up. Limpe primeiro toda
+        // a apresentação; reativar mantendo `isCycling` deixava o painel preso.
+        cancelCycle()
+        reenableEventTap()
+    }
+
     func beginOrAdvanceCycle(reverse: Bool) {
         guard settings.shortcutEnabled, state == .active else { return }
 
         if !isCycling {
+            onCycleWillStart()
             AccessibilityService.cancelPendingRestoration()
             windowManager.refresh(includeUtilityWindows: settings.includeUtilityWindows)
-            let current = windowManager.frontmostWindow()
-            allCycleWindows = orderedWindows(startingAt: current)
+            let localWindows = additionalWindows()
+            let current = localWindows.first(where: \.isAccessibilityFocused)
+                ?? windowManager.frontmostWindow()
+            allCycleWindows = orderedWindows(
+                windowManager.windows + localWindows,
+                startingAt: current
+            )
             cycleWindows = allCycleWindows
             guard !cycleWindows.isEmpty else { return }
 
@@ -346,6 +372,7 @@ final class GlobalShortcutMonitor: ObservableObject {
                 size: settings.switcherSize,
                 keepSearchOpen: settings.keepSearchOpen
             )
+            scheduleCommandReleaseWatchdog()
         } else {
             moveSelection(by: reverse ? -1 : 1)
         }
@@ -500,7 +527,12 @@ final class GlobalShortcutMonitor: ObservableObject {
     }
 
     func cancelCycle() {
-        guard isCycling else { return }
+        commandReleaseWatchdog?.cancel()
+        commandReleaseWatchdog = nil
+        guard isCycling else {
+            panelController.hideDemo()
+            return
+        }
         isCycling = false
         isCycleActiveForEventTap = false
         isSearchActiveForEventTap = false
@@ -512,8 +544,7 @@ final class GlobalShortcutMonitor: ObservableObject {
         panelController.hide()
     }
 
-    private func orderedWindows(startingAt current: WindowInfo?) -> [WindowInfo] {
-        let ordered = windowManager.windows
+    private func orderedWindows(_ ordered: [WindowInfo], startingAt current: WindowInfo?) -> [WindowInfo] {
         guard let currentID = current?.id,
               let currentIndex = ordered.firstIndex(where: { $0.id == currentID }) else {
             return ordered
@@ -523,6 +554,8 @@ final class GlobalShortcutMonitor: ObservableObject {
 
     func finishCycle() {
         guard isCycling else { return }
+        commandReleaseWatchdog?.cancel()
+        commandReleaseWatchdog = nil
         isCycling = false
         isCycleActiveForEventTap = false
         isSearchActiveForEventTap = false
@@ -545,10 +578,31 @@ final class GlobalShortcutMonitor: ObservableObject {
         cycleWindows = []
         searchQuery = ""
         lastSearchShiftPress = nil
-        activate(selectedWindow)
+        if !activateLocally(selectedWindow) {
+            activate(selectedWindow)
+        }
+    }
+
+    private func scheduleCommandReleaseWatchdog() {
+        commandReleaseWatchdog?.cancel()
+        guard isCycling, !isSearchDetachedForEventTap else { return }
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.isCycling, !self.isSearchDetachedForEventTap else { return }
+            if self.commandIsPressed() {
+                self.scheduleCommandReleaseWatchdog()
+            } else if self.isSearchActiveForEventTap, self.settings.keepSearchOpen {
+                self.detachSearchFromCommand()
+            } else {
+                self.finishCycle()
+            }
+        }
+        commandReleaseWatchdog = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: workItem)
     }
 
     private func tearDownEventTap() {
+        commandReleaseWatchdog?.cancel()
+        commandReleaseWatchdog = nil
         isCycleActiveForEventTap = false
         isSearchActiveForEventTap = false
         isSearchDetachedForEventTap = false

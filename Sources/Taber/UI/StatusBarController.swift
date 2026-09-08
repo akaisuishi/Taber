@@ -3,20 +3,30 @@ import Combine
 import SwiftUI
 
 @MainActor
-final class StatusBarController: NSObject, NSPopoverDelegate {
+final class StatusBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
     private let settings: SettingsStore
     private let monitor: GlobalShortcutMonitor
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let popover = NSPopover()
+    private let contextMenu = NSMenu(title: "Taber")
     private let onOpenSettings: () -> Void
     private let onQuit: () -> Void
+    private let onWillPresentOverlay: () -> Void
     private var cancellables = Set<AnyCancellable>()
+    nonisolated(unsafe) private var workspaceActivationObserver: NSObjectProtocol?
 
-    init(settings: SettingsStore, monitor: GlobalShortcutMonitor, onOpenSettings: @escaping () -> Void, onQuit: @escaping () -> Void) {
+    init(
+        settings: SettingsStore,
+        monitor: GlobalShortcutMonitor,
+        onOpenSettings: @escaping () -> Void,
+        onQuit: @escaping () -> Void,
+        onWillPresentOverlay: @escaping () -> Void = {}
+    ) {
         self.settings = settings
         self.monitor = monitor
         self.onOpenSettings = onOpenSettings
         self.onQuit = onQuit
+        self.onWillPresentOverlay = onWillPresentOverlay
         super.init()
         let button = statusItem.button
         button?.image = NSImage(systemSymbolName: "rectangle.3.group.fill", accessibilityDescription: "Taber")
@@ -29,29 +39,63 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         popover.delegate = self
         popover.contentViewController = NSHostingController(rootView: QuickSettingsView(settings: settings, monitor: monitor, onOpenSettings: { [weak self] in self?.openSettings() }, onQuit: { [weak self] in self?.quit() }, onDismiss: { [weak self] in self?.popover.performClose(nil) }))
+        configureContextMenu()
+        workspaceActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+                    as? NSRunningApplication,
+                  application.processIdentifier != ProcessInfo.processInfo.processIdentifier
+            else { return }
+            MainActor.assumeIsolated { self?.dismissPopover() }
+        }
+    }
+
+    deinit {
+        if let workspaceActivationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(workspaceActivationObserver)
+        }
     }
 
     @objc private func togglePopover() {
         guard let button = statusItem.button else { return }
         if NSApp.currentEvent?.type == .rightMouseUp {
-            popover.performClose(nil)
-            let menu = NSMenu()
-            for (title, action, key) in [
-                (settings.shortcutEnabled ? "Pausar Taber" : "Ativar Taber", #selector(toggleShortcut), ""),
-                ("Configurações…", #selector(openSettings), ","),
-                ("Encerrar Taber", #selector(quit), "q")
-            ] {
-                let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
-                item.target = self
-                menu.addItem(item)
-            }
-            statusItem.menu = menu
-            button.performClick(nil)
-            statusItem.menu = nil
+            dismissPopover()
+            onWillPresentOverlay()
+            contextMenu.popUp(
+                positioning: nil,
+                at: NSPoint(x: button.bounds.minX, y: button.bounds.minY - 2),
+                in: button
+            )
         } else if popover.isShown { popover.performClose(nil) }
         else {
+            onWillPresentOverlay()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            popover.contentViewController?.view.window?.makeKey()
+        }
+    }
+
+
+    func dismissPopover() {
+        guard popover.isShown else { return }
+        popover.performClose(nil)
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        contextMenu.item(at: 0)?.title = settings.shortcutEnabled ? "Pausar Taber" : "Ativar Taber"
+    }
+
+    private func configureContextMenu() {
+        contextMenu.delegate = self
+        for (title, action, key) in [
+            ("Pausar Taber", #selector(toggleShortcut), ""),
+            ("Configurações…", #selector(openSettings), ","),
+            ("Encerrar Taber", #selector(quit), "q")
+        ] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            item.target = self
+            contextMenu.addItem(item)
         }
     }
     @objc private func toggleShortcut() { settings.shortcutEnabled.toggle() }

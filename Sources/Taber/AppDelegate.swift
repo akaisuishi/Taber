@@ -10,6 +10,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var switcherPanelController: SwitcherPanelController!
     private var settingsWindowController: SettingsWindowController?
     private var previewHideWorkItem: DispatchWorkItem?
+    private var registeredSettingsWindowNumber: CGWindowID?
+    private var registeredSettingsIdentity: WindowIdentity?
+    private var applicationResignObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let isUITesting = ProcessInfo.processInfo.arguments.contains("--ui-testing")
@@ -19,14 +22,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shortcutMonitor = GlobalShortcutMonitor(
             windowManager: windowManager,
             settings: settings,
-            panelController: switcherPanelController
+            panelController: switcherPanelController,
+            additionalWindows: { [weak self] in
+                self?.settingsWindowSnapshot().map { [$0] } ?? []
+            }
         )
         statusBarController = StatusBarController(
             settings: settings,
             monitor: shortcutMonitor,
             onOpenSettings: { [weak self] in self?.openSettings() },
-            onQuit: { NSApp.terminate(nil) }
+            onQuit: { NSApp.terminate(nil) },
+            onWillPresentOverlay: { [weak self] in self?.prepareForStatusOverlay() }
         )
+        shortcutMonitor.onCycleWillStart = { [weak self] in
+            self?.prepareForLiveCycle()
+        }
+        applicationResignObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: NSApp,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.cancelPreview() }
+        }
         if isUITesting { openSettings() } else { shortcutMonitor.start() }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
@@ -97,23 +114,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openSettings() {
+        statusBarController?.dismissPopover()
+        shortcutMonitor?.cancelCycle()
+        cancelPreview()
         if settingsWindowController == nil {
             settingsWindowController = SettingsWindowController(
                 settings: settings,
                 monitor: shortcutMonitor,
                 onRequestAccessibility: { AccessibilityService.openAccessibilitySettings() },
                 onRequestScreenRecording: { AccessibilityService.openScreenRecordingSettings() },
-                onPreviewStyle: { [weak self] style in self?.previewSwitcher(style: style) }
+                onPreviewStyle: { [weak self] style in self?.previewSwitcher(style: style) },
+                onWindowStateChange: { [weak self] window in
+                    self?.registerSettingsWindow(window)
+                },
+                onDismissPreview: { [weak self] in self?.cancelPreview() }
             )
         }
 
-        settingsWindowController?.showWindow(nil)
-        settingsWindowController?.window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        settingsWindowController?.activateSettingsWindow()
     }
 
     private func previewSwitcher(style: SwitcherStyle) {
-        previewHideWorkItem?.cancel()
+        statusBarController?.dismissPopover()
+        shortcutMonitor.cancelCycle()
+        cancelPreview()
         switcherPanelController.show(
             windows: WindowInfo.demoWindows,
             selectedIndex: 1,
@@ -128,5 +152,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         previewHideWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: workItem)
+    }
+
+    private func prepareForStatusOverlay() {
+        shortcutMonitor.cancelCycle()
+        cancelPreview()
+    }
+
+    private func prepareForLiveCycle() {
+        statusBarController?.dismissPopover()
+        cancelPreview()
+    }
+
+    private func cancelPreview() {
+        previewHideWorkItem?.cancel()
+        previewHideWorkItem = nil
+        switcherPanelController?.hideDemo()
+    }
+
+    private func settingsWindowSnapshot() -> WindowInfo? {
+        guard let controller = settingsWindowController,
+              let window = controller.window,
+              let registeredSettingsWindowNumber,
+              registeredSettingsWindowNumber == CGWindowID(window.windowNumber),
+              window.isVisible || window.isMiniaturized
+        else { return nil }
+
+        return WindowInfo(
+            id: registeredSettingsWindowNumber,
+            ownerPID: ProcessInfo.processInfo.processIdentifier,
+            bundleIdentifier: Bundle.main.bundleIdentifier ?? "com.taber.app",
+            applicationName: "Taber",
+            title: "Configurações",
+            bounds: window.frame,
+            isOnScreen: window.isVisible && !window.isMiniaturized,
+            isMinimized: window.isMiniaturized,
+            activationMode: .raiseWindow,
+            screenName: window.screen?.localizedName ?? "",
+            icon: NSApp.applicationIconImage,
+            accessibilityIdentifier: "taber.settings",
+            accessibilityOrdinal: 0,
+            isAccessibilityFocused: window.isKeyWindow,
+            processLaunchDate: NSRunningApplication.current.launchDate
+        )
+    }
+
+    private func registerSettingsWindow(_ window: NSWindow?) {
+        if let registeredSettingsIdentity {
+            AccessibilityService.unregisterLocalWindow(id: registeredSettingsIdentity)
+        }
+        registeredSettingsWindowNumber = nil
+        registeredSettingsIdentity = nil
+
+        guard let window else { return }
+        let windowNumber = CGWindowID(window.windowNumber)
+        let identity = WindowIdentity.windowServer(
+            ownerPID: ProcessInfo.processInfo.processIdentifier,
+            launchDate: NSRunningApplication.current.launchDate,
+            id: windowNumber
+        )
+        registeredSettingsWindowNumber = windowNumber
+        registeredSettingsIdentity = identity
+        AccessibilityService.registerLocalWindow(id: identity) { [weak self] in
+            guard let controller = self?.settingsWindowController,
+                  controller.window?.windowNumber == Int(windowNumber)
+            else { return false }
+            controller.activateSettingsWindow()
+            return true
+        }
     }
 }

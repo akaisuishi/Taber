@@ -14,6 +14,11 @@ struct AccessibilityWindowSnapshot {
     let isMain: Bool
     let isFocused: Bool
     let ordinal: Int
+    var role: String = ""
+
+    var identityFallback: AccessibilityWindowFallback {
+        AccessibilityWindowFallback(document: document, title: title, bounds: bounds, ordinal: ordinal)
+    }
 }
 
 /// Injectable snapshots keep WindowServer/AX integration out of deterministic tests.
@@ -35,6 +40,7 @@ final class WindowManager {
     private var didReportIdentityResolver = false
     private var refreshDeadline = TimeInterval.greatestFiniteMagnitude
     private var snapshotComplete = true
+    private var accessibilitySnapshotCache: [pid_t: [AccessibilityWindowSnapshot]] = [:]
     private var screens: [NSScreen] = []
     private let logger = Logger(subsystem: "com.taber.app", category: "windows")
 
@@ -48,6 +54,7 @@ final class WindowManager {
         }
         let refreshStartedAt = ContinuousClock.now
         exactMatchesInRefresh = 0
+        accessibilitySnapshotCache.removeAll(keepingCapacity: true)
         if !didReportIdentityResolver {
             logger.notice(
                 "Identidade AX-WindowServer disponível=\(AccessibilityWindowIdentityResolver.isAvailable)"
@@ -68,7 +75,7 @@ final class WindowManager {
         }
 
         var activePIDs = Set<pid_t>()
-        let rawCandidates: [WindowInfo] = windowList.compactMap { info in
+        var rawCandidates: [WindowInfo] = windowList.compactMap { info in
             guard let ownerPIDNumber = info[kCGWindowOwnerPID as String] as? NSNumber else { return nil }
             let ownerPID = ownerPIDNumber.int32Value
             guard ownerPID != ownPID,
@@ -128,6 +135,56 @@ final class WindowManager {
             )
         }
 
+        // Accessibility is an independent source, rather than enrichment that
+        // only runs after WindowServer returned a surface. This recovers fully
+        // minimized/AX-only windows and standard dialogs omitted by CG.
+        let orderedApplications = runningApplications.values.sorted { lhs, rhs in
+            if lhs.processIdentifier == frontmostPID { return true }
+            if rhs.processIdentifier == frontmostPID { return false }
+            let lhsHasCG = activePIDs.contains(lhs.processIdentifier)
+            let rhsHasCG = activePIDs.contains(rhs.processIdentifier)
+            if lhsHasCG != rhsHasCG { return lhsHasCG }
+            return lhs.processIdentifier < rhs.processIdentifier
+        }
+        for application in orderedApplications where application.processIdentifier != ownPID
+            && ProcessInfo.processInfo.systemUptime < refreshDeadline {
+            let pid = application.processIdentifier
+            let snapshots = accessibilityWindows(for: pid, includeUtilityWindows: includeUtilityWindows)
+            accessibilitySnapshotCache[pid] = snapshots
+            guard !snapshots.isEmpty else { continue }
+            let existingWindowIDs = Set(rawCandidates.filter { $0.ownerPID == pid }.compactMap(\.windowServerID))
+            for snapshot in snapshots where snapshot.windowID == nil || !existingWindowIDs.contains(snapshot.windowID!) {
+                let context = WindowEligibilityContext(
+                    bundleIdentifier: application.bundleIdentifier ?? "",
+                    activationPolicy: application.activationPolicy,
+                    title: snapshot.title,
+                    bounds: snapshot.bounds,
+                    layer: 0,
+                    alpha: 1,
+                    isOnScreen: !snapshot.isMinimized,
+                    isHelperProcess: (application.bundleURL?.path ?? "").contains(".app/Contents/"),
+                    evidence: .accessibility,
+                    accessibilitySubrole: snapshot.subrole
+                )
+                guard WindowEligibilityPolicy.allows(context, includeUtilityWindows: includeUtilityWindows) else { continue }
+                let identity: WindowIdentity = snapshot.windowID.map {
+                    .windowServer(ownerPID: pid, launchDate: application.launchDate, id: $0)
+                } ?? .accessibility(ownerPID: pid, launchDate: application.launchDate,
+                                    identifier: snapshot.identifier, fallback: snapshot.identityFallback)
+                rawCandidates.append(WindowInfo(
+                    identity: identity, windowServerID: snapshot.windowID, ownerPID: pid,
+                    bundleIdentifier: application.bundleIdentifier ?? "",
+                    applicationName: application.localizedName ?? "Aplicativo", title: snapshot.title,
+                    bounds: snapshot.bounds, isOnScreen: !snapshot.isMinimized,
+                    isMinimized: snapshot.isMinimized, isFullScreen: isFullScreenWindow(snapshot.bounds),
+                    icon: application.icon, accessibilityIdentifier: snapshot.identifier,
+                    accessibilityOrdinal: snapshot.ordinal, isAccessibilityFocused: snapshot.isFocused,
+                    processLaunchDate: application.launchDate
+                ))
+                activePIDs.insert(pid)
+            }
+        }
+
         windows = reconcile(rawCandidates, frontmostPID: frontmostPID, includeUtilityWindows: includeUtilityWindows)
         let elapsed = refreshStartedAt.duration(to: .now)
         logger.notice("Varredura: janelas=\(self.windows.count) duração=\(String(describing: elapsed), privacy: .public)")
@@ -136,7 +193,7 @@ final class WindowManager {
 
     private func reconcile(_ rawCandidates: [WindowInfo], frontmostPID: pid_t?, includeUtilityWindows: Bool) -> [WindowInfo] {
         let candidatesByPID = Dictionary(grouping: rawCandidates, by: \.ownerPID)
-        var canonicalWindowsByID: [CGWindowID: WindowInfo] = [:]
+        var canonicalWindowsByID: [WindowIdentity: WindowInfo] = [:]
 
         let orderedPIDs = candidatesByPID.keys.sorted {
             if $0 == frontmostPID { return true }
@@ -167,13 +224,15 @@ final class WindowManager {
         // reconciliação com as janelas reais da Acessibilidade.
         let originalIDs = Set(rawCandidates.map(\.id))
         let canonicalWindows = rawCandidates.compactMap { canonicalWindowsByID[$0.id] }
-            + canonicalWindowsByID.values.filter { !originalIDs.contains($0.id) }.sorted { $0.id < $1.id }
+            + canonicalWindowsByID.values.filter { !originalIDs.contains($0.id) }
+                .sorted { $0.id.description < $1.id.description }
         // Consultar o Space exige uma chamada ao WindowServer por janela.
         // Faça isso somente depois de remover superfícies auxiliares.
-        let resolvedSpaces = source?.spaces(for: canonicalWindows.map(\.id))
-            ?? SpaceResolver.shared.resolve(windowIDs: canonicalWindows.map(\.id))
+        let windowServerIDs = canonicalWindows.compactMap(\.windowServerID)
+        let resolvedSpaces = source?.spaces(for: windowServerIDs)
+            ?? SpaceResolver.shared.resolve(windowIDs: windowServerIDs)
         let resolvedWindows = canonicalWindows.map { window in
-            window.withResolvedSpace(resolvedSpaces[window.id])
+            window.withResolvedSpace(window.windowServerID.flatMap { resolvedSpaces[$0] })
         }
         return disambiguateRepeatedTitles(in: resolvedWindows)
     }
@@ -209,6 +268,9 @@ final class WindowManager {
                     || candidate.isFullScreen
                     || !candidate.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             }
+            // WindowServer IDs remain distinct evidence even when an AX
+            // snapshot times out. Preserve the entries; activation will
+            // reject an ambiguous fallback instead of choosing at random.
             return deduplicateByGeometry(credibleCandidates)
         }
 
@@ -221,7 +283,7 @@ final class WindowManager {
         for accessibilityWindow in accessibilityWindows {
             let bestIndex: Int?
             if let exactWindowID = accessibilityWindow.windowID,
-               let exactIndex = remaining.firstIndex(where: { $0.id == exactWindowID }) {
+               let exactIndex = remaining.firstIndex(where: { $0.windowServerID == exactWindowID }) {
                 bestIndex = exactIndex
                 exactMatchesInRefresh += 1
             } else if accessibilityWindow.windowID == nil {
@@ -242,15 +304,23 @@ final class WindowManager {
             }
             guard let bestIndex else {
                 // Minimized AX windows may temporarily disappear from CGWindowList.
-                if let id = accessibilityWindow.windowID, accessibilityWindow.isMinimized,
-                   let template = candidates.first {
-                    let recovered = WindowInfo(id: id, ownerPID: ownerPID,
-                        bundleIdentifier: template.bundleIdentifier, applicationName: template.applicationName,
-                        title: accessibilityWindow.title, bounds: accessibilityWindow.bounds,
-                        isOnScreen: false, isMinimized: true, icon: template.icon,
+                if let template = candidates.first {
+                    let identity: WindowIdentity = accessibilityWindow.windowID.map {
+                        .windowServer(ownerPID: ownerPID, launchDate: template.processLaunchDate, id: $0)
+                    } ?? .accessibility(ownerPID: ownerPID, launchDate: template.processLaunchDate,
+                                       identifier: accessibilityWindow.identifier,
+                                       fallback: accessibilityWindow.identityFallback)
+                    let recovered = WindowInfo(identity: identity, windowServerID: accessibilityWindow.windowID,
+                        ownerPID: ownerPID, bundleIdentifier: template.bundleIdentifier,
+                        applicationName: template.applicationName, title: accessibilityWindow.title,
+                        bounds: accessibilityWindow.bounds, isOnScreen: false,
+                        isMinimized: accessibilityWindow.isMinimized, icon: template.icon,
                         accessibilityIdentifier: accessibilityWindow.identifier,
                         accessibilityOrdinal: accessibilityWindow.ordinal,
-                        processLaunchDate: template.processLaunchDate)
+                        isAccessibilityFocused: accessibilityWindow.isFocused,
+                        processLaunchDate: template.processLaunchDate,
+                        activationPID: template.activationPID,
+                        activationProcessLaunchDate: template.activationProcessLaunchDate)
                     matched.append((recovered, accessibilityWindow))
                 }
                 continue
@@ -262,7 +332,7 @@ final class WindowManager {
             )
             if candidateActivationMode == .activateApplication {
                 logger.notice(
-                    "Fullscreen de conteúdo detectado: pid=\(ownerPID) janela=\(candidate.id)"
+                    "Fullscreen de conteúdo detectado: pid=\(ownerPID) janela=\(String(describing: candidate.id), privacy: .public)"
                 )
             }
             matched.append((
@@ -364,7 +434,7 @@ final class WindowManager {
         // minimizada ou em outro Space não expõe geometria suficiente. As
         // superfícies restantes passam pelo fallback conservador, sem apagar
         // as identidades já resolvidas das outras janelas do aplicativo.
-        guard !matched.isEmpty else { return deduplicateByGeometry(candidates) }
+        guard !matched.isEmpty else { return consolidateAmbiguousApplicationSurfaces(candidates) }
         let matchedWindows = matched.map(\.window)
         if matchedAccessibilityWindowCount == accessibilityWindows.count && snapshotComplete {
             return matchedWindows
@@ -378,6 +448,7 @@ final class WindowManager {
     ) -> [AccessibilityWindowSnapshot] {
         snapshotComplete = true
         if let source { return source.accessibilityWindows(for: ownerPID, includeUtilityWindows: includeUtilityWindows) }
+        if let cached = accessibilitySnapshotCache[ownerPID] { return cached }
         let deadline = min(refreshDeadline, ProcessInfo.processInfo.systemUptime + 0.12)
         guard ProcessInfo.processInfo.systemUptime < deadline else { snapshotComplete = false; return [] }
         let application = AXUIElementCreateApplication(ownerPID)
@@ -389,7 +460,7 @@ final class WindowManager {
               let elements = value as? [AXUIElement] else { snapshotComplete = false; return [] }
         let attributes = [kAXSubroleAttribute, kAXTitleAttribute, kAXDocumentAttribute, kAXIdentifierAttribute,
                           kAXPositionAttribute, kAXSizeAttribute, kAXMinimizedAttribute,
-                          kAXFocusedAttribute, kAXMainAttribute] as CFArray
+                          kAXFocusedAttribute, kAXMainAttribute, kAXRoleAttribute] as CFArray
         var snapshots: [AccessibilityWindowSnapshot] = []
         for (ordinal, element) in elements.enumerated() {
             guard ProcessInfo.processInfo.systemUptime < deadline, ordinal < 512 else {
@@ -398,9 +469,12 @@ final class WindowManager {
             AXUIElementSetMessagingTimeout(element, 0.04)
             var values: CFArray?
             guard AXUIElementCopyMultipleAttributeValues(element, attributes, [], &values) == .success,
-                  let fields = values as? [Any], fields.count == 9 else { snapshotComplete = false; continue }
+                  let fields = values as? [Any], fields.count == 10 else { snapshotComplete = false; continue }
             let subrole = fields[0] as? String ?? ""
-            let standard = subrole.isEmpty || subrole == kAXStandardWindowSubrole || subrole == kAXDialogSubrole
+            let standard = subrole.isEmpty
+                || subrole == kAXStandardWindowSubrole
+                || subrole == kAXDialogSubrole
+                || fields[9] as? String == kAXSheetRole
             let utility = includeUtilityWindows && (subrole == kAXFloatingWindowSubrole || subrole == kAXSystemFloatingWindowSubrole)
             guard standard || utility else { continue }
             guard CFGetTypeID(fields[4] as CFTypeRef) == AXValueGetTypeID(),
@@ -417,7 +491,8 @@ final class WindowManager {
                 isMinimized: (fields[6] as? NSNumber)?.boolValue ?? false,
                 isMain: ((fields[8] as? NSNumber)?.boolValue ?? false) || mainWindow.map { CFEqual(element, $0) } == true,
                 isFocused: ((fields[7] as? NSNumber)?.boolValue ?? false) || focusedWindow.map { CFEqual(element, $0) } == true,
-                ordinal: ordinal))
+                ordinal: ordinal,
+                role: fields[9] as? String ?? ""))
         }
         return snapshots
     }
@@ -435,7 +510,7 @@ final class WindowManager {
 
         return WindowMatchingPolicy.requiresApplicationActivation(
             isPresentationSized: true,
-            hasExactWindowIDMatch: accessibilityWindow.windowID == candidate.id,
+            hasExactWindowIDMatch: accessibilityWindow.windowID == candidate.windowServerID,
             isDialog: accessibilityWindow.subrole == kAXDialogSubrole as String,
             candidateTitle: candidate.title,
             candidateBounds: candidate.bounds,
@@ -458,7 +533,7 @@ final class WindowManager {
             isPresentationSized: candidate.isFullScreen
                 || fillsVisibleScreen(candidate.bounds)
                 || coversMostOfScreen(candidate.bounds),
-            candidateWindowID: candidate.id,
+            candidateWindowID: candidate.windowServerID ?? 0,
             accessibilityWindowIDs: accessibilityWindows.map(\.windowID),
             fallbackRequiresApplicationActivation: allFallbackMatchesRequireApplicationActivation
         )
@@ -508,7 +583,7 @@ final class WindowManager {
             return "\(window.ownerPID)|\(normalized(window.displayTitle))"
         }
 
-        var occurrenceByWindowID: [CGWindowID: (occurrence: Int, count: Int)] = [:]
+        var occurrenceByWindowID: [WindowIdentity: (occurrence: Int, count: Int)] = [:]
         for indices in groups.values where indices.count > 1 {
             for (offset, index) in indices.enumerated() {
                 occurrenceByWindowID[windows[index].id] = (offset + 1, indices.count)
@@ -523,8 +598,20 @@ final class WindowManager {
 
     private func deduplicateByGeometry(_ candidates: [WindowInfo]) -> [WindowInfo] {
         // Geometry and title are not identities (Finder, private browsing).
-        var seen = Set<CGWindowID>()
+        var seen = Set<WindowIdentity>()
         return candidates.filter { seen.insert($0.id).inserted }
+    }
+
+    private func consolidateAmbiguousApplicationSurfaces(_ candidates: [WindowInfo]) -> [WindowInfo] {
+        guard candidates.count > 1 else { return candidates }
+        let fingerprints = Set(candidates.map {
+            "\(normalized($0.title))|\(Int($0.bounds.minX / 8))|\(Int($0.bounds.minY / 8))|\(Int($0.bounds.width / 8))|\(Int($0.bounds.height / 8))"
+        })
+        let allUntitled = candidates.allSatisfy { $0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard fingerprints.count == 1 || allUntitled else { return deduplicateByGeometry(candidates) }
+        // There is no defensible per-window identity. Expose one app target
+        // rather than selecting an arbitrary renderer surface.
+        return candidates.first.map { [$0.withActivationMode(.activateApplication)] } ?? []
     }
 
     private func credibleFallbackCandidates(_ candidates: [WindowInfo]) -> [WindowInfo] {
