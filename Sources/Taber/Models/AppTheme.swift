@@ -40,9 +40,6 @@ enum AppTheme: String, CaseIterable, Identifiable {
 
     /// Tint sobre o material nativo. O tema claro precisa de um pouco mais de
     /// cobertura para preservar contraste sobre conteúdo luminoso.
-    var transparencyTintOpacity: Double {
-        self == .light ? 0.82 : 0.72
-    }
 
     var palette: TaberThemePalette {
         switch self {
@@ -124,7 +121,16 @@ private struct TaberTransparencyEnabledKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct TaberTransparencyPercentKey: EnvironmentKey {
+    static let defaultValue: Double = 15
+}
+
 extension EnvironmentValues {
+    var taberTransparencyPercent: Double {
+        get { self[TaberTransparencyPercentKey.self] }
+        set { self[TaberTransparencyPercentKey.self] = newValue }
+    }
+
     var taberThemePalette: TaberThemePalette {
         get { self[TaberThemePaletteKey.self] }
         set { self[TaberThemePaletteKey.self] = newValue }
@@ -145,6 +151,13 @@ enum TaberDesign {
 /// Mantém a precedência da preferência de acessibilidade verificável sem
 /// depender do estado global do Mac que está executando os testes.
 enum TaberTransparencyPolicy {
+    static func normalizedPercent(_ value: Double) -> Double {
+        value.isFinite ? min(60, max(0, value.rounded())) : 15
+    }
+    static func tintOpacity(percent: Double, userEnabled: Bool, reduceTransparency: Bool) -> Double {
+        isEffective(userEnabled: userEnabled, reduceTransparency: reduceTransparency)
+            ? 1 - normalizedPercent(percent) / 100 : 1
+    }
     static func isEffective(userEnabled: Bool, reduceTransparency: Bool) -> Bool {
         userEnabled && !reduceTransparency
     }
@@ -155,7 +168,8 @@ struct TaberSurfaceBackground: View {
     @Environment(\.taberTransparencyEnabled) private var transparencyEnabled
     let color: Color
     var material: NSVisualEffectView.Material = .popover
-    var tintOpacity: Double = 0.72
+    var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
+    @Environment(\.taberTransparencyPercent) private var percent
 
     var usesTransparency: Bool {
         TaberTransparencyPolicy.isEffective(
@@ -166,18 +180,20 @@ struct TaberSurfaceBackground: View {
 
     var body: some View {
         ZStack {
-            if usesTransparency { TaberMaterial(material: material) }
-            color.opacity(usesTransparency ? tintOpacity : 1)
+            if usesTransparency && percent > 0 { TaberMaterial(material: material, blendingMode: blendingMode) }
+            color.opacity(TaberTransparencyPolicy.tintOpacity(percent: percent,
+                userEnabled: transparencyEnabled, reduceTransparency: reduceTransparency))
         }
     }
 }
 
 private struct TaberMaterial: NSViewRepresentable {
     let material: NSVisualEffectView.Material
+    let blendingMode: NSVisualEffectView.BlendingMode
     func makeNSView(context: Context) -> NSVisualEffectView { NSVisualEffectView() }
     func updateNSView(_ view: NSVisualEffectView, context: Context) {
         view.material = material
-        view.blendingMode = .behindWindow
+        view.blendingMode = blendingMode
         view.state = .active
     }
 }

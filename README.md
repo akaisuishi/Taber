@@ -20,7 +20,7 @@ Taber é um alternador de janelas para macOS que intercepta `Command + Tab` e pe
 - Exclui agentes em segundo plano, helpers, Spotlight e superfícies técnicas.
 - Oferece busca instantânea por nome do aplicativo ou título da janela.
 - Exibe miniaturas locais quando a permissão de Gravação de Tela está ativa.
-- Permite três tamanhos, três temas e transparência global opcional.
+- Permite três tamanhos, três temas e transparência opcional com intensidade ajustável.
 - Pode iniciar automaticamente com a sessão do macOS.
 
 ## Aparências
@@ -34,8 +34,10 @@ Taber é um alternador de janelas para macOS que intercepta `Command + Tab` e pe
 
 O painel se adapta automaticamente à quantidade de janelas. Os tamanhos **Compacto**, **Médio** e **Grande** ajustam texto, ícones, miniaturas, espaçamento e quantidade visível. Os temas disponíveis são **Original**, **Dark** e **Claro**.
 A transparência pode ser ativada nas Configurações ou no painel rápido e vale
-para o alternador, o painel e a própria janela de Configurações. A preferência
-de acessibilidade **Reduzir Transparência** do macOS sempre prevalece.
+para o alternador e o menu rápido. A intensidade começa em **15%** e pode ser
+ajustada de **0% a 60%**, sem tornar texto, ícones ou miniaturas transparentes.
+As Configurações e sua barra de título permanecem sólidas. A preferência de
+acessibilidade **Reduzir Transparência** do macOS sempre prevalece.
 
 <p align="center">
   <img src="Docs/Images/taber-settings.png" width="720" alt="Configurações de aparência e comportamento do Taber">
@@ -170,8 +172,8 @@ O Taber não envia títulos, imagens ou conteúdo das janelas para nenhum servi�
 
 ## Versionamento
 
-Este repositório começou no estado consolidado do **Taber 1.0.1 (build 3)**. A versão atual é **Taber 1.2.0 (build 8)**. Como não existia um repositório Git antes do primeiro marco, versões intermediárias anteriores não foram recriadas artificialmente. Os commits seguem [Conventional Commits](https://www.conventionalcommits.org/), por exemplo `feat:`, `fix:`, `perf:`, `docs:` e `chore:`.
+Este repositório começou no estado consolidado do **Taber 1.0.1 (build 3)**. A versão atual é **Taber 1.2.3 (build 11)**. Como não existia um repositório Git antes do primeiro marco, versões intermediárias anteriores não foram recriadas artificialmente. Os commits seguem [Conventional Commits](https://www.conventionalcommits.org/), por exemplo `feat:`, `fix:`, `perf:`, `docs:` e `chore:`.
 
-Consulte as [correções e validações da 1.2.0](Docs/Release-1.2.0.md) e o [histórico detalhado da 1.1.0](Docs/Release-1.1.0.md).
+Consulte as [correções e validações da 1.2.3](Docs/Release-1.2.3.md), [tela cheia na 1.2.2](Docs/Release-1.2.2.md), [Finder na 1.2.1](Docs/Release-1.2.1.md) e o [histórico detalhado da 1.1.0](Docs/Release-1.1.0.md).
 
 O código é privado e ainda não possui licença de distribuição pública.

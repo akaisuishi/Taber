@@ -12,6 +12,7 @@ final class SettingsStore: ObservableObject {
         static let searchShortcut = "searchShortcut"
         static let keepSearchOpen = "keepSearchOpen"
         static let transparencyEnabled = "transparencyEnabled"
+        static let transparencyPercent = "transparencyPercent"
     }
 
     private let defaults: UserDefaults
@@ -52,6 +53,14 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(transparencyEnabled, forKey: Keys.transparencyEnabled) }
     }
 
+    @Published var transparencyPercent: Double {
+        didSet {
+            let normalized = TaberTransparencyPolicy.normalizedPercent(transparencyPercent)
+            if normalized != transparencyPercent { transparencyPercent = normalized }
+            defaults.set(normalized, forKey: Keys.transparencyPercent)
+        }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         settingsSection = defaults.string(forKey: "settingsSection") ?? "appearance"
@@ -59,6 +68,8 @@ final class SettingsStore: ObservableObject {
         includeUtilityWindows = defaults.object(forKey: Keys.includeUtilityWindows) as? Bool ?? false
         keepSearchOpen = defaults.object(forKey: Keys.keepSearchOpen) as? Bool ?? true
         transparencyEnabled = defaults.object(forKey: Keys.transparencyEnabled) as? Bool ?? false
+        transparencyPercent = TaberTransparencyPolicy.normalizedPercent(
+            (defaults.object(forKey: Keys.transparencyPercent) as? NSNumber)?.doubleValue ?? 15)
 
         if let rawValue = defaults.string(forKey: Keys.switcherStyle),
            let style = SwitcherStyle(rawValue: rawValue) {

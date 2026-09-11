@@ -213,6 +213,12 @@ final class GlobalShortcutMonitor: ObservableObject {
         searchShortcutForEventTap = settings.searchShortcut
         keepSearchOpenForEventTap = settings.keepSearchOpen
 
+        settings.$transparencyEnabled.combineLatest(settings.$transparencyPercent)
+            .sink { [weak panelController] enabled, percent in
+                panelController?.model.updateTransparency(enabled: enabled, percent: percent)
+            }
+            .store(in: &cancellables)
+
         settings.$shortcutEnabled
             .dropFirst()
             .sink { [weak self] _ in self?.reconfigure() }
@@ -371,6 +377,7 @@ final class GlobalShortcutMonitor: ObservableObject {
                 theme: settings.appTheme,
                 size: settings.switcherSize,
                 transparencyEnabled: settings.transparencyEnabled,
+                transparencyPercent: settings.transparencyPercent,
                 keepSearchOpen: settings.keepSearchOpen
             )
             scheduleCommandReleaseWatchdog()

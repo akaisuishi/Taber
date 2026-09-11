@@ -10,6 +10,7 @@ final class SwitcherViewModel: ObservableObject {
     @Published private(set) var theme: AppTheme = .original
     @Published private(set) var size: SwitcherSize = .medium
     @Published private(set) var transparencyEnabled = false
+    @Published private(set) var transparencyPercent: Double = 15
     @Published private(set) var searchQuery = ""
     @Published private(set) var isSearching = false
     @Published private(set) var isSearchDetached = false
@@ -23,7 +24,8 @@ final class SwitcherViewModel: ObservableObject {
         style: SwitcherStyle,
         theme: AppTheme,
         size: SwitcherSize,
-        transparencyEnabled: Bool = false
+        transparencyEnabled: Bool = false,
+        transparencyPercent: Double = 15
     ) {
         thumbnailGeneration &+= 1
         self.windows = windows
@@ -32,9 +34,15 @@ final class SwitcherViewModel: ObservableObject {
         self.theme = theme
         self.size = size
         self.transparencyEnabled = transparencyEnabled
+        self.transparencyPercent = transparencyPercent
         searchQuery = ""
         isSearching = false
         isSearchDetached = false
+    }
+
+    func updateTransparency(enabled: Bool, percent: Double) {
+        transparencyEnabled = enabled
+        transparencyPercent = TaberTransparencyPolicy.normalizedPercent(percent)
     }
 
     func select(index: Int) {
@@ -101,6 +109,7 @@ final class SwitcherPanelController {
         theme: AppTheme,
         size: SwitcherSize,
         transparencyEnabled: Bool = false,
+        transparencyPercent: Double = 15,
         isDemo: Bool = false,
         keepSearchOpen: Bool = true
     ) {
@@ -120,7 +129,8 @@ final class SwitcherPanelController {
             style: style,
             theme: theme,
             size: size,
-            transparencyEnabled: transparencyEnabled
+            transparencyEnabled: transparencyEnabled,
+            transparencyPercent: transparencyPercent
         )
         panel.level = .statusBar
         panel.orderFrontRegardless()

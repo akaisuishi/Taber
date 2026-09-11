@@ -1,12 +1,10 @@
 import AppKit
-import Combine
 import SwiftUI
 
 @MainActor
 final class SettingsWindowController: NSWindowController {
     private let onWindowStateChange: (NSWindow?) -> Void
     private let onDismissPreview: () -> Void
-    private var cancellables = Set<AnyCancellable>()
 
     init(
         settings: SettingsStore,
@@ -32,24 +30,12 @@ final class SettingsWindowController: NSWindowController {
         window.setContentSize(NSSize(width: 880, height: 660))
         window.minSize = NSSize(width: 780, height: 602)
         window.setFrameAutosaveName("TaberSettings")
-        window.titlebarAppearsTransparent = true
+        window.titlebarAppearsTransparent = false
+        window.isOpaque = true
+        window.backgroundColor = .windowBackgroundColor
         window.center()
         super.init(window: window)
         window.delegate = self
-
-        settings.$transparencyEnabled
-            .removeDuplicates()
-            .sink { [weak self] enabled in self?.applyWindowTransparency(preferenceEnabled: enabled) }
-            .store(in: &cancellables)
-        NSWorkspace.shared.notificationCenter.publisher(
-            for: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification
-        )
-        .sink { [weak self, weak settings] _ in
-            guard let settings else { return }
-            self?.applyWindowTransparency(preferenceEnabled: settings.transparencyEnabled)
-        }
-        .store(in: &cancellables)
-        applyWindowTransparency(preferenceEnabled: settings.transparencyEnabled)
     }
 
     @available(*, unavailable)
@@ -83,16 +69,6 @@ final class SettingsWindowController: NSWindowController {
             return
         }
         onWindowStateChange(window)
-    }
-
-    private func applyWindowTransparency(preferenceEnabled: Bool) {
-        guard let window else { return }
-        let effective = TaberTransparencyPolicy.isEffective(
-            userEnabled: preferenceEnabled,
-            reduceTransparency: NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
-        )
-        window.isOpaque = !effective
-        window.backgroundColor = effective ? .clear : .windowBackgroundColor
     }
 }
 

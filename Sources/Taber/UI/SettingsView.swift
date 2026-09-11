@@ -67,14 +67,14 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .background(TaberSurfaceBackground(color: palette.background, material: .windowBackground, tintOpacity: settings.appTheme.transparencyTintOpacity))
+        .background(palette.background)
         .foregroundStyle(palette.primary)
         .font(.system(size: 13))
         .tint(palette.accent)
         .preferredColorScheme(settings.appTheme.colorScheme)
         .environment(\.colorScheme, settings.appTheme.colorScheme)
         .environment(\.taberThemePalette, palette)
-        .environment(\.taberTransparencyEnabled, settings.transparencyEnabled)
+        .environment(\.taberTransparencyEnabled, false)
         .frame(minWidth: 780, minHeight: 580)
         .onAppear { launchAtLogin = LaunchAtLoginService.isEnabled }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -138,13 +138,14 @@ struct SettingsView: View {
                     }
                 }
             }
-            row("Transparência", "Usa o material do macOS no alternador, painel rápido e Configurações. A opção Reduzir Transparência sempre prevalece.") {
+            row("Transparência", "Fundo desfocado no alternador e no menu rápido. Configurações permanecem sólidas. Reduzir Transparência do macOS prevalece.") {
                 Toggle("Transparência", isOn: $settings.transparencyEnabled)
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .accessibilityIdentifier("appearance.transparency")
                     .accessibilityValue(settings.transparencyEnabled ? "Ativada" : "Desativada")
             }
+            TransparencyAmountControl(settings: settings, identifier: "appearance.transparencyPercent")
             VStack(spacing: 12) {
                 HStack {
                     Label("Prévia interativa", systemImage: "play.rectangle").font(.system(size: 11, weight: .medium))
@@ -153,6 +154,13 @@ struct SettingsView: View {
                 }
                 DemoSwitcherPreview(style: settings.switcherStyle, selection: $demoSelection)
                     .frame(height: 152)
+                    .padding(8)
+                    .background(TaberSurfaceBackground(color: palette.panel, blendingMode: .withinWindow))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .background(LinearGradient(colors: [palette.accent, palette.accentSecondary],
+                        startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 8))
+                    .environment(\.taberTransparencyEnabled, settings.transparencyEnabled)
+                    .environment(\.taberTransparencyPercent, settings.transparencyPercent)
                 HStack {
                     Text("\(demoSelection + 1) de 3").monospacedDigit()
                     Spacer()
@@ -342,5 +350,24 @@ extension WindowInfo {
         zip(["Projeto — Taber", "Documentos", "Notas de viagem"], ["safari", "folder", "doc.text"]).enumerated().map { index, item in
             WindowInfo(id: UInt32(index + 1), ownerPID: -1, bundleIdentifier: "com.taber.example.\(index)", applicationName: ["Safari", "Finder", "Notas"][index], title: item.0, bounds: CGRect(x: 0, y: 0, width: 1200, height: 800), isOnScreen: true, isMinimized: false, spaceNumber: index == 2 ? 2 : 1, icon: NSImage(systemSymbolName: item.1, accessibilityDescription: nil))
         }
+    }
+}
+
+struct TransparencyAmountControl: View {
+    @ObservedObject var settings: SettingsStore
+    let identifier: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Intensidade da transparência")
+                Spacer()
+                Text("\(Int(settings.transparencyPercent))%").monospacedDigit()
+            }
+            Slider(value: $settings.transparencyPercent, in: 0...60, step: 1)
+                .accessibilityLabel("Intensidade da transparência")
+                .accessibilityValue("\(Int(settings.transparencyPercent)) por cento")
+                .accessibilityIdentifier(identifier)
+                .disabled(!settings.transparencyEnabled)
+        }.font(.system(size: 12))
     }
 }

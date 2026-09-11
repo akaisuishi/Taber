@@ -18,9 +18,10 @@ struct VisualChecks {
         var count = 0
         for theme in AppTheme.allCases {
             settings.appTheme = theme
-            for transparencyEnabled in [false, true] {
+            for (transparencyEnabled, percent) in [(false, 15.0), (true, 0.0), (true, 15.0), (true, 60.0)] {
                 settings.transparencyEnabled = transparencyEnabled
-                let transparencyName = transparencyEnabled ? "on" : "off"
+                settings.transparencyPercent = percent
+                let transparencyName = transparencyEnabled ? "\(Int(percent))" : "off"
 
                 // Configurações e painel rápido também participam da matriz de
                 // transparência; todas as seções são preservadas como fixtures.
@@ -35,13 +36,18 @@ struct VisualChecks {
                 }
                 try render(
                     QuickSettingsView(settings: settings, monitor: monitor, onOpenSettings: {}, onQuit: {}),
-                    size: CGSize(width: 320, height: 410),
+                    size: CGSize(width: 320, height: 540),
                     to: output.appendingPathComponent("menu-\(theme.rawValue)-transparency-\(transparencyName).png")
                 )
                 count += 1
+                let smallLayout = QuickSettingsLayout()
+                smallLayout.maximumSize = NSSize(width: 320, height: 280)
+                try render(QuickSettingsView(settings: settings, monitor: monitor, layout: smallLayout,
+                    onOpenSettings: {}, onQuit: {}), size: CGSize(width: 320, height: 280),
+                    to: output.appendingPathComponent("menu-small-\(theme.rawValue)-transparency-\(transparencyName).png"))
+                count += 1
 
-                // Matriz de aceitação: 4 visuais × 3 temas × 3 tamanhos ×
-                // transparência ligada/desligada (72 imagens).
+                // Matriz: 4 visuais × 3 temas × 3 tamanhos × OFF/0%/15%/60%.
                 for style in SwitcherStyle.allCases {
                     for size in SwitcherSize.allCases {
                         let model = SwitcherViewModel()
@@ -53,7 +59,8 @@ struct VisualChecks {
                             style: style,
                             theme: theme,
                             size: size,
-                            transparencyEnabled: transparencyEnabled
+                            transparencyEnabled: transparencyEnabled,
+                            transparencyPercent: percent
                         )
                         let requested = SwitcherPanelController.requestedSize(
                             for: style,
@@ -147,6 +154,8 @@ struct VisualChecks {
         let hosting = NSHostingView(rootView: view)
         let window = NSWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.isOpaque = false
+        window.backgroundColor = .clear
         window.contentView = hosting
         window.setContentSize(size)
         hosting.frame = CGRect(origin: .zero, size: size)

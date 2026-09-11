@@ -123,3 +123,10 @@ O gate repetível de 200 janelas registrou mediana de **1,519 ms**, contra
 baseline de 5,568 ms e limite de 6,125 ms (+10%); não houve regressão. A
 validação com o League instalado continua **aguardando validação guiada** e segue o
 [checklist dedicado](WindowRefactorAcceptance.md#checklist-guiado--league-of-legends).
+
+## Correções 1.2.1–1.2.3
+
+- Finder: 62 testes lógicos aprovados na entrega 1.2.1; inclui AX vazio completo, consulta incompleta, superfícies da área de trabalho, janelas reais minimizadas e renderizadores sem AX.
+- Tela cheia: 68 testes lógicos aprovados na 1.2.2; inclui confirmação de destino, cancelamento, timeout, identidade host/player e associação ambígua. O teste real de vídeo no Chrome foi iniciado, mas a captura de retorno ficou preta, portanto o resultado ao vivo é inconclusivo.
+- Transparência/menu: 73 testes lógicos aprovados na 1.2.3 e 312 renderizações de fixtures. Inclui 0%, 15%, 60%, OFF, persistência, acessibilidade e menu com altura restrita.
+- Ver [1.2.1](Release-1.2.1.md), [1.2.2](Release-1.2.2.md) e [1.2.3](Release-1.2.3.md) para evidências e limitações.

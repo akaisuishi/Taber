@@ -779,6 +779,72 @@ final class WindowWorkflowTests: XCTestCase {
         XCTAssertFalse(manager.windows.contains { $0.presentationWindowID != nil })
     }
 
+    func testTransparencyAmountMigratesPersistsAndClamps() async {
+        let suite = "com.taber.tests.percent.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "transparencyEnabled")
+        let settings = SettingsStore(defaults: defaults)
+        XCTAssertTrue(settings.transparencyEnabled)
+        XCTAssertEqual(settings.transparencyPercent, 15)
+        settings.transparencyPercent = 42
+        XCTAssertEqual(SettingsStore(defaults: defaults).transparencyPercent, 42)
+        settings.transparencyPercent = 100
+        XCTAssertEqual(settings.transparencyPercent, 60)
+        XCTAssertEqual(SettingsStore(defaults: defaults).transparencyPercent, 60)
+        settings.transparencyPercent = .nan
+        XCTAssertEqual(settings.transparencyPercent, 15)
+        XCTAssertEqual(TaberTransparencyPolicy.normalizedPercent(-5), 0)
+        XCTAssertEqual(TaberTransparencyPolicy.normalizedPercent(12.6), 13)
+    }
+
+    func testTransparencyOpacityAndAccessibilityPrecedence() async {
+        for (percent, expected) in [(0.0, 1.0), (15.0, 0.85), (60.0, 0.4)] {
+            XCTAssertEqual(TaberTransparencyPolicy.tintOpacity(percent: percent,
+                userEnabled: true, reduceTransparency: false), expected, accuracy: 0.001)
+            XCTAssertEqual(TaberTransparencyPolicy.tintOpacity(percent: percent,
+                userEnabled: true, reduceTransparency: true), 1)
+            XCTAssertEqual(TaberTransparencyPolicy.tintOpacity(percent: percent,
+                userEnabled: false, reduceTransparency: false), 1)
+        }
+    }
+
+    func testOpenSwitcherReceivesTransparencyChangesWithoutResettingSelection() async {
+        let source = FixtureSource(); source.raw = [window(), window(2)]; source.ax = [ax(1), ax(2)]
+        let (monitor, panel, settings) = monitor(source)
+        monitor.beginOrAdvanceCycle(reverse: false)
+        let index = panel.model.selectedIndex
+        settings.transparencyEnabled = true; settings.transparencyPercent = 60
+        XCTAssertTrue(panel.model.transparencyEnabled)
+        XCTAssertEqual(panel.model.transparencyPercent, 60)
+        XCTAssertEqual(panel.model.selectedIndex, index)
+        monitor.cancelCycle()
+    }
+
+    func testSettingsWindowStaysOpaqueWhenTransparencyChanges() async {
+        let (monitor, _, settings) = monitor(FixtureSource())
+        let controller = SettingsWindowController(settings: settings, monitor: monitor,
+            onRequestAccessibility: {}, onRequestScreenRecording: {}, onPreviewStyle: { _ in })
+        settings.transparencyEnabled = true; settings.transparencyPercent = 60
+        XCTAssertEqual(controller.window?.isOpaque, true)
+        XCTAssertEqual(controller.window?.titlebarAppearsTransparent, false)
+    }
+
+    func testQuickMenuFitsSmallAndOffsetDisplays() async {
+        for frame in [NSRect(x: 0, y: 0, width: 640, height: 360),
+                      NSRect(x: -1280, y: -720, width: 1280, height: 680),
+                      NSRect(x: 1710, y: 400, width: 1920, height: 1000)] {
+            let anchor = NSRect(x: frame.maxX - 30, y: frame.maxY, width: 22, height: 24)
+            let size = QuickSettingsLayout.availableSize(anchor: anchor, visibleFrame: frame)
+            XCTAssertLessThanOrEqual(size.width, frame.width - 16)
+            XCTAssertLessThanOrEqual(size.height + 24, frame.height)
+            let layout = QuickSettingsLayout(); layout.maximumSize = size; layout.contentHeight = 1200
+            XCTAssertEqual(layout.viewportSize.height, size.height)
+            layout.contentHeight = 100
+            XCTAssertEqual(layout.viewportSize.height, 100)
+        }
+    }
+
     func test33RepeatablePerformanceFixture() async {
         let source = FixtureSource()
         source.raw = (1...200).map { window(UInt32($0)) }
