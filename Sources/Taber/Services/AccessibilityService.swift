@@ -130,12 +130,19 @@ final class WindowActivationCoordinator {
         steps.append(.applicationActivated)
         target.focus()
         steps.append(.focusedAndRaised)
-        if window.isMinimized {
+        // Activating an app while leaving a fullscreen Space is asynchronous.
+        // In that case the destination is reported as off-screen even though
+        // it is not minimized, and the first AX raise can happen before the
+        // Space transition completes. Repeat the identity-safe activation once
+        // after the transition has had time to start.
+        if window.isMinimized || !window.isOnScreen {
             steps.append(.retryScheduled)
-            clock.schedule(after: .milliseconds(100)) { [weak self] in
+            clock.schedule(after: .milliseconds(240)) { [weak self] in
                 guard self?.generation == request,
-                      target.resolve(window), target.isMinimized else { return }
-                target.restore()
+                      target.resolve(window) else { return }
+                if target.isMinimized {
+                    target.restore()
+                }
                 target.activateApplication()
                 target.focus()
             }

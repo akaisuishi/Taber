@@ -46,7 +46,12 @@ protocol WindowSnapshotSource {
     var frontmostPID: pid_t? { get }
     func candidates(includeUtilityWindows: Bool) -> [WindowInfo]
     func accessibilityWindows(for pid: pid_t, includeUtilityWindows: Bool) -> [AccessibilityWindowSnapshot]
+    func accessibilitySnapshotIsComplete(for pid: pid_t) -> Bool
     func spaces(for ids: [CGWindowID]) -> [CGWindowID: ResolvedWindowSpace]
+}
+
+extension WindowSnapshotSource {
+    func accessibilitySnapshotIsComplete(for pid: pid_t) -> Bool { true }
 }
 
 @MainActor
@@ -204,6 +209,9 @@ final class WindowManager {
                     )
                     activationApplicationCache[pid] = activationApplication
                 }
+                guard WindowEligibilityPolicy.isUserAccessibilitySurface(
+                    bundleIdentifier: application.bundleIdentifier ?? "", role: snapshot.role,
+                    subrole: snapshot.subrole) else { continue }
                 let context = WindowEligibilityContext(
                     bundleIdentifier: application.bundleIdentifier ?? "",
                     activationPolicy: application.activationPolicy,
@@ -317,7 +325,8 @@ final class WindowManager {
         // O WindowServer pode levar alguns milissegundos para refletir um
         // Command + M. O aplicativo em primeiro plano precisa ser confirmado
         // via AX mesmo quando só possui uma superfície ainda marcada on-screen.
-        let needsAccessibilityReconciliation = WindowMatchingPolicy.shouldReconcileWithAccessibility(
+        let isFinder = candidates.first?.bundleIdentifier == "com.apple.finder"
+        let needsAccessibilityReconciliation = isFinder || WindowMatchingPolicy.shouldReconcileWithAccessibility(
             candidateCount: candidates.count,
             containsOffscreenWindow: candidates.contains(where: { !$0.isOnScreen }),
             containsFullScreenWindow: candidates.contains(where: { $0.isFullScreen }),
@@ -328,9 +337,15 @@ final class WindowManager {
         let accessibilityWindows = accessibilityWindows(
             for: ownerPID,
             includeUtilityWindows: includeUtilityWindows
-        )
+        ).filter {
+            WindowEligibilityPolicy.isUserAccessibilitySurface(
+                bundleIdentifier: candidates.first?.bundleIdentifier ?? "", role: $0.role, subrole: $0.subrole)
+        }
 
         guard !accessibilityWindows.isEmpty else {
+            // Finder exposes desktop/preview surfaces even with no document windows.
+            // Only a complete AX response can prove its window list is empty.
+            if isFinder && snapshotComplete { return [] }
             // Alguns processos regulares mantêm superfícies 500×500 vazias
             // no WindowServer mesmo sem possuir uma janela alternável. Sem
             // confirmação AX, preserve apenas superfícies com evidência real.
@@ -343,7 +358,8 @@ final class WindowManager {
             // distinguem os alvos. Superfícies realmente indistinguíveis são
             // reduzidas a um alvo de aplicativo, pois não há como prometer
             // qual janela individual receberia o foco.
-            return consolidateAmbiguousApplicationSurfaces(credibleCandidates)
+            return isFinder ? deduplicateByGeometry(credibleCandidates)
+                : consolidateAmbiguousApplicationSurfaces(credibleCandidates)
         }
 
         var isMatched = [Bool](repeating: false, count: candidates.count)
@@ -520,7 +536,7 @@ final class WindowManager {
         // as identidades já resolvidas das outras janelas do aplicativo.
         guard !matched.isEmpty else { return consolidateAmbiguousApplicationSurfaces(candidates) }
         let matchedWindows = matched.map(\.window)
-        if matchedAccessibilityWindowCount == accessibilityWindows.count && snapshotComplete {
+        if snapshotComplete && (isFinder || matchedAccessibilityWindowCount == accessibilityWindows.count) {
             return matchedWindows
         }
         return matchedWindows + deduplicateByGeometry(credibleFallbackCandidates(remaining))
@@ -531,7 +547,10 @@ final class WindowManager {
         includeUtilityWindows: Bool
     ) -> [AccessibilityWindowSnapshot] {
         snapshotComplete = true
-        if let source { return source.accessibilityWindows(for: ownerPID, includeUtilityWindows: includeUtilityWindows) }
+        if let source {
+            snapshotComplete = source.accessibilitySnapshotIsComplete(for: ownerPID)
+            return source.accessibilityWindows(for: ownerPID, includeUtilityWindows: includeUtilityWindows)
+        }
         if let cached = accessibilitySnapshotCache[ownerPID] {
             snapshotComplete = accessibilitySnapshotCompleteness[ownerPID] ?? true
             return cached
@@ -624,7 +643,9 @@ final class WindowManager {
                 || subrole == kAXDialogSubrole
                 || fields[9] as? String == kAXSheetRole
             let utility = includeUtilityWindows && (subrole == kAXFloatingWindowSubrole || subrole == kAXSystemFloatingWindowSubrole)
-            guard standard || utility else { continue }
+            guard standard || utility,
+                  WindowEligibilityPolicy.isUserAccessibilitySurface(bundleIdentifier: "",
+                      role: fields[9] as? String ?? "", subrole: subrole) else { continue }
             guard CFGetTypeID(fields[4] as CFTypeRef) == AXValueGetTypeID(),
                   CFGetTypeID(fields[5] as CFTypeRef) == AXValueGetTypeID() else { continue }
             var position = CGPoint.zero

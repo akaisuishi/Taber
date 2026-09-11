@@ -110,8 +110,10 @@ fallback sem APIs privadas, Command-up perdido, event tap desabilitado,
 exclusividade de overlays e precedência de “Reduzir Transparência”.
 
 Execução final em 08/09/2026: 20 regressões puras, 4 fixtures da sonda,
-55 testes lógicos e 1 teste de UI aprovados, sem falhas. Evidência:
-`Build/Validation/20260908-100544.xcresult`. O build universal arm64 + x86_64
+57 testes lógicos e 1 teste de UI aprovados, sem falhas. A suíte lógica inclui
+a saída de uma superfície fullscreen sem AX confiável para uma janela de outro
+aplicativo/Space e a repetição segura de foco após a transição. Evidência:
+`Build/Validation/20260908-182335.xcresult`. O build universal arm64 + x86_64
 sem assinatura também passou. A matriz visual produziu 198 imagens em
 `/tmp/taber-task4-visuals-final`; combinações representativas ON/OFF dos três temas,
 quatro visuais, Configurações e painel rápido foram inspecionadas sem corte ou

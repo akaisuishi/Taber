@@ -8,7 +8,7 @@ aplicativo ou hardware indisponível no ambiente de desenvolvimento.
 
 | Verificação | Estado | Evidência esperada |
 |---|---|---|
-| Fixtures de descoberta, identidade e ativação | **Aprovada** | 55 `TaberTests` em `Build/Validation/20260908-100544.xcresult` |
+| Fixtures de descoberta, identidade e ativação | **Aprovada** | 57 `TaberTests` em `Build/Validation/20260908-182335.xcresult` |
 | Event tap, Command-up perdido e overlays | **Aprovada por fixture/UI** | `TaberTests` e `TaberUITests` |
 | Transparência ON/OFF, temas e visuais | **Aprovada por fixture e inspeção representativa** | 198 imagens em `/tmp/taber-task4-visuals-final` |
 | Build universal sem assinatura | **Aprovada** | arm64 + x86_64, `CODE_SIGNING_ALLOWED=NO` |
@@ -21,10 +21,14 @@ desenvolvimento e, portanto, cliente, partida e fullscreen real permanecem com
 o estado **aguardando validação guiada**.
 
 Execução final em 08/09/2026, macOS 26.6.2 arm64: 20 regressões puras,
-4 fixtures da sonda, 55 testes lógicos e 1 teste de UI aprovados, sem falhas.
+4 fixtures da sonda, 57 testes lógicos e 1 teste de UI aprovados, sem falhas.
 O teste HID opcional permaneceu fora da suíte por exigir janelas descartáveis e
 teclado físico. O gate de 200 janelas mediu mediana de **1,519 ms**, abaixo da
 baseline 1.1.0 de 5,568 ms e do limite de 6,125 ms (+10%).
+
+A validação de 57 testes acrescenta dois casos de regressão: sair de uma
+superfície fullscreen/CG-only sem AX confiável para outra aplicação e repetir
+o foco da mesma identidade depois que o macOS inicia a mudança de Space.
 
 ## Sonda de elegibilidade
 

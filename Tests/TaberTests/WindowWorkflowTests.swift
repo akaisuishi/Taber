@@ -3,6 +3,8 @@ import XCTest
 
 @MainActor
 final class FixtureSource: WindowSnapshotSource {
+    var complete = false
+    func accessibilitySnapshotIsComplete(for pid: pid_t) -> Bool { complete || !ax.isEmpty }
     var frontmostPID: pid_t? = 42
     var raw: [WindowInfo] = []
     var ax: [AccessibilityWindowSnapshot] = []
@@ -60,10 +62,11 @@ final class WindowWorkflowTests: XCTestCase {
     let rect = CGRect(x: 20, y: 40, width: 800, height: 600)
 
     func window(_ id: UInt32 = 1, title: String = "Documento", minimized: Bool = false,
+                onScreen: Bool? = nil,
                 full: Bool = false, mode: WindowActivationMode = .raiseWindow,
                 bundle: String = "com.apple.finder", pid: pid_t = 42) -> WindowInfo {
         WindowInfo(id: id, ownerPID: pid, bundleIdentifier: bundle, applicationName: "Fixture",
-                   title: title, bounds: rect, isOnScreen: !minimized, isMinimized: minimized,
+                   title: title, bounds: rect, isOnScreen: onScreen ?? !minimized, isMinimized: minimized,
                    isFullScreen: full, activationMode: mode, icon: nil)
     }
     func ax(_ id: UInt32?, focused: Bool = false, main: Bool = false, minimized: Bool = false,
@@ -617,7 +620,7 @@ final class WindowWorkflowTests: XCTestCase {
 
     func test73IndistinguishableCGOnlySurfacesCollapseToOneApplicationTarget() async {
         let source = FixtureSource()
-        source.raw = [window(title: ""), window(2, title: "")]
+        source.raw = [window(title: "", bundle: "com.game.renderer"), window(2, title: "", bundle: "com.game.renderer")]
         source.ax = []
         let manager = WindowManager(source: source)
 
@@ -626,6 +629,88 @@ final class WindowWorkflowTests: XCTestCase {
         XCTAssertEqual(manager.windows.count, 1,
             "Superfícies sem identidade individual defensável devem representar um único alvo de aplicativo")
         XCTAssertEqual(manager.windows.first?.activationMode, .activateApplication)
+    }
+
+    func test74LeavingFullscreenSelectsWindowFromAnotherApplication() async {
+        let source = FixtureSource()
+        source.frontmostPID = 42
+        source.raw = [
+            window(1, title: "Tela cheia", full: true, pid: 42),
+            window(2, title: "Destino", onScreen: false, pid: 84)
+        ]
+        // A janela de origem representa inclusive renderizadores fullscreen
+        // sem uma árvore AX confiável; o PID em primeiro plano ainda deve
+        // estabelecer o início correto do ciclo.
+        source.ax = []
+        var activated: WindowInfo?
+        let defaults = UserDefaults(suiteName: "com.taber.tests.\(UUID().uuidString)")!
+        let settings = SettingsStore(defaults: defaults)
+        let panel = SwitcherPanelController(); panel.model.isDemo = true
+        let monitor = GlobalShortcutMonitor(windowManager: WindowManager(source: source), settings: settings,
+            panelController: panel, initialState: .active, commandIsPressed: { true },
+            activate: { activated = $0 })
+
+        monitor.beginOrAdvanceCycle(reverse: false)
+        XCTAssertEqual(panel.model.windows.first?.windowServerID, 1)
+        XCTAssertEqual(panel.model.windows[panel.model.selectedIndex].windowServerID, 2)
+        monitor.finishCycle()
+
+        XCTAssertEqual(activated?.windowServerID, 2)
+        XCTAssertEqual(activated?.ownerPID, 84)
+    }
+
+    func test75OffscreenDestinationRetriesAfterFullscreenSpaceTransition() async {
+        let driver = FixtureDriver()
+        driver.isMinimized = false
+        let clock = ManualActivationClock()
+        let coordinator = WindowActivationCoordinator(clock: clock) { _ in driver }
+
+        let result = coordinator.activate(window(2, title: "Destino", onScreen: false, pid: 84))
+
+        XCTAssertEqual(result.steps, [.targetResolved, .restored, .applicationActivated,
+            .focusedAndRaised, .retryScheduled])
+        XCTAssertEqual(driver.operations, ["resolve", "restore", "activate", "focus"])
+        clock.advance()
+        XCTAssertEqual(driver.operations,
+            ["resolve", "restore", "activate", "focus", "resolve", "activate", "focus"])
+    }
+
+    func testFinderCompleteEmptySnapshotRemovesGhostEvenInBackground() async {
+        let source = FixtureSource(); source.frontmostPID = 99; source.complete = true
+        source.raw = [window()]
+        let manager = WindowManager(source: source); manager.refresh()
+        XCTAssertTrue(manager.windows.isEmpty)
+        source.ax = [ax(1)]; manager.refresh()
+        XCTAssertEqual(manager.windows.count, 1)
+        source.ax = []; manager.refresh()
+        XCTAssertTrue(manager.windows.isEmpty)
+    }
+
+    func testFinderIncompleteSnapshotPreservesRealCandidates() async {
+        let source = FixtureSource(); source.raw = [window(), window(2, minimized: true)]
+        let manager = WindowManager(source: source); manager.refresh()
+        XCTAssertEqual(manager.windows.count, 2)
+    }
+
+    func testFinderDesktopAXSurfaceIsNotAWindow() async {
+        let (manager, _) = manager([window()], [ax(1, subrole: "", role: "AXScrollArea")])
+        XCTAssertTrue(manager.windows.isEmpty)
+        XCTAssertFalse(WindowEligibilityPolicy.isUserAccessibilitySurface(
+            bundleIdentifier: "com.apple.finder", role: "AXWindow", subrole: "AXUnknown"))
+    }
+
+    func testFinderConfirmedWindowsExcludeResidualSurface() async {
+        let (manager, _) = manager([window(), window(2, minimized: true), window(3)],
+            [ax(1), ax(2, minimized: true)])
+        XCTAssertEqual(manager.windows.compactMap(\.windowServerID).sorted(), [1, 2])
+        XCTAssertTrue(manager.windows.contains { $0.isMinimized })
+    }
+
+    func testCustomRendererSurvivesCompleteEmptyAXResponse() async {
+        let source = FixtureSource(); source.complete = true
+        source.raw = [window(bundle: "com.game.renderer")]
+        let manager = WindowManager(source: source); manager.refresh()
+        XCTAssertEqual(manager.windows.count, 1)
     }
 
     func test33RepeatablePerformanceFixture() async {

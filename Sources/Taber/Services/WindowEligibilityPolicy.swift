@@ -36,6 +36,15 @@ enum WindowEligibilityPolicy {
         "com.apple.AccessibilityVisualsAgent"
     ]
 
+    static func isUserAccessibilitySurface(bundleIdentifier: String, role: String, subrole: String) -> Bool {
+        guard role.isEmpty || role == kAXWindowRole as String || role == kAXSheetRole as String else { return false }
+        if bundleIdentifier == "com.apple.finder" {
+            return subrole == kAXStandardWindowSubrole as String
+                || subrole == kAXDialogSubrole as String || role == kAXSheetRole as String
+        }
+        return true
+    }
+
     static func evaluate(_ context: WindowEligibilityContext, includeUtilityWindows: Bool) -> WindowEligibilityDecision {
         if systemShellBundleIdentifiers.contains(context.bundleIdentifier) {
             return .init(isEligible: false, reason: .systemShell)
