@@ -47,6 +47,7 @@ struct WindowInfo: Identifiable, Hashable {
     let isOnScreen: Bool
     private(set) var isMinimized: Bool
     private(set) var isFullScreen: Bool
+    private(set) var presentationWindowID: CGWindowID? = nil
     private(set) var activationMode: WindowActivationMode
     private(set) var spaceIdentifier: UInt64?
     private(set) var spaceNumber: Int?
@@ -143,6 +144,13 @@ struct WindowInfo: Identifiable, Hashable {
         copy.spaceLocations = resolvedSpace?.locations ?? []
         copy.isOnAllDesktops = resolvedSpace?.isOnAllDesktops ?? false
         copy.isFullScreen = isFullScreen || (resolvedSpace?.isFullScreen ?? false)
+        return copy
+    }
+    func withPresentation(windowID: CGWindowID?) -> WindowInfo {
+        var copy = self
+        copy.presentationWindowID = windowID
+        copy.isFullScreen = true
+        copy.activationMode = .activateApplication
         return copy
     }
     func withActivationMode(_ mode: WindowActivationMode) -> WindowInfo {

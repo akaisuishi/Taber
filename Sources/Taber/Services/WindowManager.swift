@@ -15,6 +15,7 @@ struct AccessibilityWindowSnapshot: Sendable {
     let isFocused: Bool
     let ordinal: Int
     var role: String = ""
+    var isNativeFullScreen = false
 
     var identityFallback: AccessibilityWindowFallback {
         AccessibilityWindowFallback(document: document, title: title, bounds: bounds, ordinal: ordinal)
@@ -166,7 +167,7 @@ final class WindowManager {
                 // Fora da tela também pode significar outro Space. O estado
                 // minimizado verdadeiro será reconciliado via Acessibilidade.
                 isMinimized: false,
-                isFullScreen: isFullScreenWindow(bounds),
+                isFullScreen: false,
                 screenName: screenName(for: bounds),
                 icon: activationApplication.icon ?? icon,
                 processLaunchDate: application.launchDate,
@@ -234,7 +235,7 @@ final class WindowManager {
                     bundleIdentifier: activationApplication.bundleIdentifier ?? application.bundleIdentifier ?? "",
                     applicationName: activationApplication.localizedName ?? application.localizedName ?? "Aplicativo", title: snapshot.title,
                     bounds: snapshot.bounds, isOnScreen: !snapshot.isMinimized,
-                    isMinimized: snapshot.isMinimized, isFullScreen: isFullScreenWindow(snapshot.bounds),
+                    isMinimized: snapshot.isMinimized, isFullScreen: snapshot.isNativeFullScreen,
                     icon: application.icon, accessibilityIdentifier: snapshot.identifier,
                     accessibilityOrdinal: snapshot.ordinal, isAccessibilityFocused: snapshot.isFocused,
                     processLaunchDate: application.launchDate,
@@ -441,6 +442,7 @@ final class WindowManager {
                     accessibilityTitle: accessibilityWindow.title,
                     isMinimized: accessibilityWindow.isMinimized,
                     isFullScreen: candidate.isFullScreen
+                        || accessibilityWindow.isNativeFullScreen
                         || candidateActivationMode == .activateApplication,
                     isFocused: accessibilityWindow.isFocused,
                     activationMode: candidateActivationMode
@@ -492,7 +494,7 @@ final class WindowManager {
                     isFullScreen: true,
                     isFocused: host.isFocused || presentation.accessibility.isFocused,
                     activationMode: .activateApplication
-                )
+                ).withPresentation(windowID: presentation.window.windowServerID)
                 hostIndicesToRemove.insert(presentationIndex)
                 logger.notice("Janela-base de fullscreen de conteúdo consolidada: pid=\(ownerPID)")
             }
@@ -515,8 +517,8 @@ final class WindowManager {
                 candidate,
                 accessibilityWindows: accessibilityWindows
             )
-        }), let hostIndex = matched.firstIndex(where: { $0.accessibility.isFocused }) {
-            remaining.remove(at: presentationIndex)
+        }), matched.count == 1, let hostIndex = matched.indices.first {
+            let presentation = remaining.remove(at: presentationIndex)
             let hostMatch = matched[hostIndex]
             let host = hostMatch.accessibility
             matched[hostIndex].window = hostMatch.window.withAccessibilityIdentity(
@@ -527,7 +529,7 @@ final class WindowManager {
                 isFullScreen: true,
                 isFocused: host.isFocused,
                 activationMode: .activateApplication
-            )
+            ).withPresentation(windowID: presentation.windowServerID)
         }
 
         // Preserve correspondências AX válidas mesmo quando uma janela
@@ -537,7 +539,10 @@ final class WindowManager {
         guard !matched.isEmpty else { return consolidateAmbiguousApplicationSurfaces(candidates) }
         let matchedWindows = matched.map(\.window)
         if snapshotComplete && (isFinder || matchedAccessibilityWindowCount == accessibilityWindows.count) {
-            return matchedWindows
+            let unassociatedPlayers = isBrowser(candidates.first?.bundleIdentifier ?? "")
+                ? remaining.filter { isDetachedFullScreenPresentation($0, accessibilityWindows: accessibilityWindows) }
+                    .map { $0.withPresentation(windowID: $0.windowServerID) } : []
+            return matchedWindows + unassociatedPlayers
         }
         return matchedWindows + deduplicateByGeometry(credibleFallbackCandidates(remaining))
     }
@@ -626,7 +631,7 @@ final class WindowManager {
               let elements = value as? [AXUIElement] else { return ([], false) }
         let attributes = [kAXSubroleAttribute, kAXTitleAttribute, kAXDocumentAttribute, kAXIdentifierAttribute,
                           kAXPositionAttribute, kAXSizeAttribute, kAXMinimizedAttribute,
-                          kAXFocusedAttribute, kAXMainAttribute, kAXRoleAttribute] as CFArray
+                          kAXFocusedAttribute, kAXMainAttribute, kAXRoleAttribute, "AXFullScreen"] as CFArray
         var snapshots: [AccessibilityWindowSnapshot] = []
         var complete = true
         for (ordinal, element) in elements.enumerated() {
@@ -636,7 +641,7 @@ final class WindowManager {
             AXUIElementSetMessagingTimeout(element, 0.04)
             var values: CFArray?
             guard AXUIElementCopyMultipleAttributeValues(element, attributes, [], &values) == .success,
-                  let fields = values as? [Any], fields.count == 10 else { complete = false; continue }
+                  let fields = values as? [Any], fields.count == 11 else { complete = false; continue }
             let subrole = fields[0] as? String ?? ""
             let standard = subrole.isEmpty
                 || subrole == kAXStandardWindowSubrole
@@ -661,7 +666,8 @@ final class WindowManager {
                 isMain: ((fields[8] as? NSNumber)?.boolValue ?? false) || mainWindow.map { CFEqual(element, $0) } == true,
                 isFocused: ((fields[7] as? NSNumber)?.boolValue ?? false) || focusedWindow.map { CFEqual(element, $0) } == true,
                 ordinal: ordinal,
-                role: fields[9] as? String ?? ""))
+                role: fields[9] as? String ?? "",
+                isNativeFullScreen: (fields[10] as? NSNumber)?.boolValue ?? false))
         }
         return (snapshots, complete)
     }
@@ -677,9 +683,10 @@ final class WindowManager {
            accessibilityWindow.subrole != kAXDialogSubrole as String {
             return .raiseWindow
         }
-        let isPresentationSized = candidate.isFullScreen
-            || fillsVisibleScreen(candidate.bounds)
-            || coversMostOfScreen(candidate.bounds)
+        // Geometry is only supporting evidence for browser player dialogs.
+        guard isBrowser(candidate.bundleIdentifier),
+              accessibilityWindow.subrole == kAXDialogSubrole as String else { return .raiseWindow }
+        let isPresentationSized = candidate.isFullScreen || isFullScreenWindow(candidate.bounds)
         guard isPresentationSized else {
             return .raiseWindow
         }
@@ -706,9 +713,7 @@ final class WindowManager {
             ) == .activateApplication
         }
         return WindowMatchingPolicy.isDetachedPresentationCandidate(
-            isPresentationSized: candidate.isFullScreen
-                || fillsVisibleScreen(candidate.bounds)
-                || coversMostOfScreen(candidate.bounds),
+            isPresentationSized: candidate.isFullScreen || isFullScreenWindow(candidate.bounds),
             candidateWindowID: candidate.windowServerID ?? 0,
             accessibilityWindowIDs: accessibilityWindows.map(\.windowID),
             fallbackRequiresApplicationActivation: allFallbackMatchesRequireApplicationActivation

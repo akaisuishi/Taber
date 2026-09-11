@@ -23,6 +23,8 @@ final class ManualActivationClock: ActivationClock {
 
 @MainActor
 final class FixtureDriver: WindowActivationDriving {
+    var confirmationState: WindowActivationConfirmation = .pending
+    func confirmation(of window: WindowInfo) -> WindowActivationConfirmation { exists ? confirmationState : .missing }
     var exists = true
     var isMinimized = true
     var operations: [String] = []
@@ -35,6 +37,7 @@ final class FixtureDriver: WindowActivationDriving {
 @MainActor
 final class ApplicationFixtureDriver: WindowActivationDriving,
     ApplicationOnlyActivationDriving, ProcessValidatingActivationDriving {
+    func confirmation(of window: WindowInfo) -> WindowActivationConfirmation { .confirmed }
     var processIsValid = true
     var applicationTargetIsValid = true
     var isMinimized = false
@@ -523,6 +526,7 @@ final class WindowWorkflowTests: XCTestCase {
         XCTAssertEqual(model.windows[model.selectedIndex].windowServerID, 71)
 
         let driver = FixtureDriver()
+        driver.confirmationState = .confirmed
         let result = WindowActivationCoordinator(clock: ManualActivationClock()) { _ in driver }
             .activate(protectedWindow)
         XCTAssertTrue(result.succeeded)
@@ -667,12 +671,11 @@ final class WindowWorkflowTests: XCTestCase {
 
         let result = coordinator.activate(window(2, title: "Destino", onScreen: false, pid: 84))
 
-        XCTAssertEqual(result.steps, [.targetResolved, .restored, .applicationActivated,
-            .focusedAndRaised, .retryScheduled])
-        XCTAssertEqual(driver.operations, ["resolve", "restore", "activate", "focus"])
+        XCTAssertEqual(result.outcome, .requested)
+        XCTAssertEqual(result.steps, [.targetResolved, .applicationActivated, .focusedAndRaised, .retryScheduled])
+        XCTAssertEqual(driver.operations, ["resolve", "activate", "focus"])
         clock.advance()
-        XCTAssertEqual(driver.operations,
-            ["resolve", "restore", "activate", "focus", "resolve", "activate", "focus"])
+        XCTAssertEqual(driver.operations, ["resolve", "activate", "focus", "resolve", "activate", "focus"])
     }
 
     func testFinderCompleteEmptySnapshotRemovesGhostEvenInBackground() async {
@@ -711,6 +714,69 @@ final class WindowWorkflowTests: XCTestCase {
         source.raw = [window(bundle: "com.game.renderer")]
         let manager = WindowManager(source: source); manager.refresh()
         XCTAssertEqual(manager.windows.count, 1)
+    }
+
+    func testActivationWaitsForConfirmedDestinationAndStopsRetrying() async {
+        let driver = FixtureDriver(); let clock = ManualActivationClock()
+        let coordinator = WindowActivationCoordinator(clock: clock) { _ in driver }
+        var outcomes: [WindowActivationResult.Outcome] = []
+        coordinator.onResult = { outcomes.append($0.outcome) }
+        XCTAssertEqual(coordinator.activate(window()).outcome, .requested)
+        clock.advance()
+        driver.confirmationState = .confirmed
+        let count = driver.operations.count
+        clock.advance(); clock.advance()
+        XCTAssertEqual(outcomes.last, .activated)
+        XCTAssertEqual(driver.operations.count, count)
+        XCTAssertTrue(clock.pending.isEmpty)
+    }
+
+    func testActivationTimeoutDoesNotReportSuccess() async {
+        let driver = FixtureDriver(); let clock = ManualActivationClock()
+        let coordinator = WindowActivationCoordinator(clock: clock, now: { 0 }) { _ in driver }
+        var result: WindowActivationResult?
+        coordinator.onResult = { result = $0 }
+        coordinator.activate(window())
+        for _ in 0..<10 { clock.advance() }
+        XCTAssertEqual(result?.outcome, .rejected(.timedOut))
+        XCTAssertTrue(clock.pending.isEmpty)
+    }
+
+    func testClosedDestinationCancelsTransitionWithoutAnotherActivation() async {
+        let driver = FixtureDriver(); let clock = ManualActivationClock()
+        let coordinator = WindowActivationCoordinator(clock: clock) { _ in driver }
+        var result: WindowActivationResult?
+        coordinator.onResult = { result = $0 }
+        coordinator.activate(window()); driver.exists = false
+        let count = driver.operations.count
+        clock.advance()
+        XCTAssertEqual(result?.outcome, .rejected(.targetNotFound))
+        XCTAssertEqual(driver.operations.count, count)
+    }
+
+    func testNativeFullscreenComesFromAXWithoutGeometryGuess() async {
+        var snapshot = ax(1); snapshot.isNativeFullScreen = true
+        let (manager, _) = manager([window()], [snapshot])
+        XCTAssertTrue(manager.windows[0].isFullScreen)
+        XCTAssertEqual(manager.windows[0].activationMode, .raiseWindow)
+    }
+
+    func testBrowserPlayerKeepsHostAndPresentationIdentities() async {
+        let (manager, _) = manager([window(1, bundle: "com.apple.Safari"),
+            window(2, full: true, bundle: "com.apple.Safari")],
+            [ax(1, document: "https://fixture/video"),
+             ax(2, subrole: "AXDialog", document: "https://fixture/video")])
+        XCTAssertEqual(manager.windows.count, 1)
+        XCTAssertEqual(manager.windows[0].windowServerID, 1)
+        XCTAssertEqual(manager.windows[0].presentationWindowID, 2)
+    }
+
+    func testAmbiguousBrowserPlayerDoesNotConsumeFocusedHost() async {
+        let (manager, _) = manager([window(1, bundle: "com.apple.Safari"),
+            window(2, bundle: "com.apple.Safari"), window(3, full: true, bundle: "com.apple.Safari")],
+            [ax(1, focused: true), ax(2), ax(3, subrole: "AXDialog")])
+        XCTAssertEqual(manager.windows.count, 3)
+        XCTAssertFalse(manager.windows.contains { $0.presentationWindowID != nil })
     }
 
     func test33RepeatablePerformanceFixture() async {

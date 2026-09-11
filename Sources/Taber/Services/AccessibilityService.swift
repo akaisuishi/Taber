@@ -10,7 +10,10 @@ protocol WindowActivationDriving {
     func focus()
     func activateApplication()
     var isMinimized: Bool { get }
+    func confirmation(of window: WindowInfo) -> WindowActivationConfirmation
 }
+
+enum WindowActivationConfirmation { case pending, confirmed, missing }
 
 /// Drivers that can validate an application-only target without requiring an
 /// AX window. This is important for games and custom renderers that expose a
@@ -31,6 +34,8 @@ enum WindowActivationRejection: String, Equatable {
     case staleProcess
     case targetNotFound
     case localActivationFailed
+    case timedOut
+    case cancelled
 }
 
 enum WindowActivationStep: String, Equatable {
@@ -44,6 +49,7 @@ enum WindowActivationStep: String, Equatable {
 
 struct WindowActivationResult: Equatable {
     enum Outcome: Equatable {
+        case requested
         case activated
         case rejected(WindowActivationRejection)
     }
@@ -76,10 +82,15 @@ final class WindowActivationCoordinator {
     private var generation: UInt = 0
     private let driver: (WindowInfo) -> any WindowActivationDriving
     private let clock: any ActivationClock
+    private let now: () -> TimeInterval
+    private var pendingResult: WindowActivationResult?
+    var onResult: ((WindowActivationResult) -> Void)?
 
     init(clock: any ActivationClock = SystemActivationClock(),
+         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
          driver: @escaping (WindowInfo) -> any WindowActivationDriving) {
         self.clock = clock
+        self.now = now
         self.driver = driver
     }
 
@@ -87,6 +98,7 @@ final class WindowActivationCoordinator {
     func activate(_ window: WindowInfo) -> WindowActivationResult {
         cancelPending()
         let request = generation
+        let deadline = now() + 2
         let target = driver(window)
         let strategy = WindowMatchingPolicy.activationStrategy(
             usesApplicationOnlyActivation: window.activationMode == .activateApplication,
@@ -117,40 +129,71 @@ final class WindowActivationCoordinator {
             }
             target.activateApplication()
             steps.append(.applicationActivated)
-            return WindowActivationResult(strategy: strategy, outcome: .activated, steps: steps)
+            return confirm(window, target: target, strategy: strategy, steps: steps,
+                           request: request, deadline: deadline, remaining: 10)
         }
 
         guard target.resolve(window) else {
             return WindowActivationResult(strategy: strategy, outcome: .rejected(.targetNotFound), steps: steps)
         }
         steps.append(.targetResolved)
-        target.restore()
-        steps.append(.restored)
+        if target.isMinimized {
+            target.restore()
+            steps.append(.restored)
+        }
         target.activateApplication()
         steps.append(.applicationActivated)
         target.focus()
         steps.append(.focusedAndRaised)
-        // Activating an app while leaving a fullscreen Space is asynchronous.
-        // In that case the destination is reported as off-screen even though
-        // it is not minimized, and the first AX raise can happen before the
-        // Space transition completes. Repeat the identity-safe activation once
-        // after the transition has had time to start.
-        if window.isMinimized || !window.isOnScreen {
-            steps.append(.retryScheduled)
-            clock.schedule(after: .milliseconds(240)) { [weak self] in
-                guard self?.generation == request,
-                      target.resolve(window) else { return }
-                if target.isMinimized {
-                    target.restore()
-                }
-                target.activateApplication()
-                target.focus()
-            }
-        }
-        return WindowActivationResult(strategy: strategy, outcome: .activated, steps: steps)
+        return confirm(window, target: target, strategy: strategy, steps: steps,
+                       request: request, deadline: deadline, remaining: 10)
     }
 
-    func cancelPending() { generation &+= 1 }
+    private func confirm(_ window: WindowInfo, target: any WindowActivationDriving,
+                         strategy: WindowMatchingPolicy.ActivationStrategy,
+                         steps: [WindowActivationStep], request: UInt,
+                         deadline: TimeInterval, remaining: Int) -> WindowActivationResult {
+        let state = target.confirmation(of: window)
+        let outcome: WindowActivationResult.Outcome
+        switch state {
+        case .confirmed: outcome = .activated
+        case .missing: outcome = .rejected(.targetNotFound)
+        case .pending: outcome = remaining == 0 || now() >= deadline ? .rejected(.timedOut) : .requested
+        }
+        var steps = steps
+        if outcome == .requested && !steps.contains(.retryScheduled) { steps.append(.retryScheduled) }
+        let result = WindowActivationResult(strategy: strategy, outcome: outcome, steps: steps)
+        pendingResult = outcome == .requested ? result : nil
+        onResult?(result)
+        guard outcome == .requested else { return result }
+        clock.schedule(after: .milliseconds(200)) { [weak self] in
+            guard let self, self.generation == request else { return }
+            // Observe before retrying: a completed transition must not steal focus again.
+            if target.confirmation(of: window) == .pending && self.now() < deadline && remaining > 1 {
+                if strategy == .application {
+                    if let validator = target as? any ApplicationOnlyActivationDriving,
+                       validator.validateApplicationTarget(window) {
+                        target.activateApplication()
+                    }
+                } else if target.resolve(window) {
+                    if target.isMinimized { target.restore() }
+                    target.activateApplication()
+                    target.focus()
+                }
+            }
+            _ = self.confirm(window, target: target, strategy: strategy, steps: steps,
+                             request: request, deadline: deadline, remaining: remaining - 1)
+        }
+        return result
+    }
+
+    func cancelPending() {
+        generation &+= 1
+        if let pendingResult {
+            self.pendingResult = nil
+            onResult?(.init(strategy: pendingResult.strategy, outcome: .rejected(.cancelled), steps: pendingResult.steps))
+        }
+    }
 }
 
 @MainActor
@@ -199,6 +242,10 @@ enum AccessibilityService {
     @discardableResult
     static func restoreAndRaise(window: WindowInfo) -> WindowActivationResult {
         coordinator.cancelPending()
+        coordinator.onResult = { result in
+            lastActivationResult = result
+            logger.notice("Activation progress=\(String(describing: result.outcome), privacy: .public)")
+        }
         let result: WindowActivationResult
         if let activateLocalWindow = localWindowActivators[window.id] {
             result = WindowActivationResult(
@@ -271,13 +318,16 @@ private final class AXWindowActivationDriver: WindowActivationDriving,
     private let application: AXUIElement
     private let ownerApplication: NSRunningApplication?
     private let activationApplication: NSRunningApplication?
+    private var resolutionIncomplete = false
     private var target: AXUIElement?
+    private let presentationWindowID: CGWindowID?
 
     init(window: WindowInfo) {
+        presentationWindowID = window.presentationWindowID
         application = AXUIElementCreateApplication(window.ownerPID)
         ownerApplication = NSRunningApplication(processIdentifier: window.ownerPID)
         activationApplication = NSRunningApplication(processIdentifier: window.activationPID)
-        AXUIElementSetMessagingTimeout(application, 0.20)
+        AXUIElementSetMessagingTimeout(application, 0.04)
     }
 
     func validateProcess(_ window: WindowInfo) -> Bool {
@@ -296,6 +346,7 @@ private final class AXWindowActivationDriver: WindowActivationDriving,
         guard validateProcess(window),
               let activationApplication,
               !activationApplication.isTerminated else { return false }
+        guard surfaceExists(window.presentationWindowID ?? window.windowServerID, ownerPID: window.ownerPID) else { return false }
         return WindowMatchingPolicy.representsSameProcess(
             expectedPID: window.activationPID,
             expectedBundleIdentifier: window.bundleIdentifier,
@@ -308,10 +359,14 @@ private final class AXWindowActivationDriver: WindowActivationDriving,
 
     func resolve(_ window: WindowInfo) -> Bool {
         target = nil
+        resolutionIncomplete = false
         guard validateProcess(window) else { return false }
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value) == .success,
-              let elements = value as? [AXUIElement] else { return false }
+        let status = AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value)
+        guard status == .success, let elements = value as? [AXUIElement] else {
+            resolutionIncomplete = status == .cannotComplete
+            return false
+        }
         let candidates = elements.enumerated().map { ordinal, element in
             ActivationCandidate(windowID: AccessibilityWindowIdentityResolver.windowID(for: element),
                 identifier: stringAttribute(kAXIdentifierAttribute as CFString, from: element),
@@ -337,7 +392,46 @@ private final class AXWindowActivationDriver: WindowActivationDriving,
         _ = AXUIElementPerformAction(target, kAXRaiseAction as CFString)
     }
 
-    func activateApplication() { activationApplication?.activate(options: []) }
+    func activateApplication() {
+        activationApplication?.activate(options: [])
+        // Raise the player itself when it exposes AX, never its normal host window.
+        if let presentationWindowID {
+            var value: CFTypeRef?
+            if AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value) == .success,
+               let elements = value as? [AXUIElement],
+               let player = elements.first(where: { AccessibilityWindowIdentityResolver.windowID(for: $0) == presentationWindowID }) {
+                _ = AXUIElementPerformAction(player, kAXRaiseAction as CFString)
+            }
+        }
+    }
+
+    private func surfaceExists(_ id: CGWindowID?, ownerPID: pid_t) -> Bool {
+        guard let id else { return false }
+        guard let rows = CGWindowListCopyWindowInfo(.optionIncludingWindow, id) as? [[String: Any]] else { return false }
+        return rows.contains { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id
+            && ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == ownerPID }
+    }
+
+    func confirmation(of window: WindowInfo) -> WindowActivationConfirmation {
+        guard validateProcess(window) else { return .missing }
+        if window.activationMode == .activateApplication {
+            guard validateApplicationTarget(window) else { return .missing }
+            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == window.activationPID else { return .pending }
+            let id = window.presentationWindowID ?? window.windowServerID
+            guard let id, let rows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] else { return .pending }
+            return rows.contains { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id } ? .confirmed : .pending
+        }
+        guard resolve(window), let target else { return resolutionIncomplete ? .pending : .missing }
+        guard !isMinimized,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == window.activationPID else { return .pending }
+        var focused: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(application, kAXFocusedWindowAttribute as CFString, &focused) == .success,
+              let focused, CFEqual(focused, target) else { return .pending }
+        if let id = window.windowServerID,
+           let rows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]],
+           !rows.contains(where: { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id }) { return .pending }
+        return .confirmed
+    }
     var isMinimized: Bool {
         target.map { boolAttribute(kAXMinimizedAttribute as CFString, from: $0) } ?? false
     }
