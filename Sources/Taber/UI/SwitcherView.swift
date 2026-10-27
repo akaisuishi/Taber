@@ -165,7 +165,7 @@ struct SwitcherView: View {
                 HStack(spacing: 12) {
                     Text(model.style.directionalHint)
                     Text(model.isSearchDetached ? "↩ abrir" : model.isSearching && model.keepSearchOpen ? "Solte ⌘ para digitar" : "Solte ⌘ para abrir")
-                    Text("Esc cancelar")
+                    Text("⌘Q encerrar app · Esc cancelar")
                 }
                 Text(model.isSearchDetached ? "↩ abrir" : "⌘ Tab")
             }
@@ -233,11 +233,14 @@ private struct WindowThumbnail: View {
         .frame(width: width, height: height)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay { RoundedRectangle(cornerRadius: 8).stroke(palette.border.opacity(0.5)) }
-        .task(id: "\(window.ownerPID):\(window.id):\(generation):\(width):\(height)") {
-            result = nil
+        .task(id: "\(WindowThumbnailService.requestKey(window, CGSize(width: width, height: height))):\(generation)") {
+            result = WindowThumbnailService.shared.cachedThumbnail(for: window, targetSize: CGSize(width: width, height: height))
             let captured = await WindowThumbnailService.shared.thumbnail(for: window, targetSize: CGSize(width: width, height: height), generation: generation)
             guard !Task.isCancelled else { return }
-            result = captured
+            if case .unavailable = captured,
+               let cached = WindowThumbnailService.shared.cachedThumbnail(for: window, targetSize: CGSize(width: width, height: height)) {
+                result = cached
+            } else { result = captured }
         }
     }
     private var message: String {

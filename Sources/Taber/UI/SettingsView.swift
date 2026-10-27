@@ -224,7 +224,7 @@ struct SettingsView: View {
                     }.labelsHidden().frame(width: 150)
                 }
                 Divider()
-                row("Manter busca aberta", "Solte Command, digite e pressione Enter para abrir.") { Toggle("Manter busca aberta", isOn: $settings.keepSearchOpen).labelsHidden() }
+                row("Manter busca aberta", "Solte Command, digite e pressione Enter para abrir. No alternador, Command + Q encerra o app selecionado.") { Toggle("Manter busca aberta", isOn: $settings.keepSearchOpen).labelsHidden() }
             }.padding(.horizontal, 16).background(palette.panel, in: RoundedRectangle(cornerRadius: TaberDesign.radius))
         }
     }
@@ -238,6 +238,18 @@ struct SettingsView: View {
                 permission("Gravação de Tela", "Permite mostrar prévias das suas janelas.", granted: CGPreflightScreenCaptureAccess(), action: onRequestScreenRecording)
             }.padding(.horizontal, 16).background(palette.panel, in: RoundedRectangle(cornerRadius: TaberDesign.radius))
             Button("Verificar permissões novamente") { permissionRevision += 1; monitor.refreshPermissions() }
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Diagnóstico local de alternância", isOn: $settings.diagnosticsEnabled)
+                    .accessibilityIdentifier("settings.diagnostics")
+                Text("Registra destino, foco e tempo das trocas, sem títulos ou conteúdo das janelas. Nada é enviado.")
+                    .font(.caption).foregroundStyle(palette.secondary)
+                if settings.diagnosticsEnabled {
+                    Button("Mostrar arquivo de diagnóstico") {
+                        TaberDiagnostics.record("diagnosticsOpened", fields: [:])
+                        NSWorkspace.shared.activateFileViewerSelecting([TaberDiagnostics.outputURL])
+                    }
+                }
+            }
             VStack(alignment: .leading, spacing: 12) {
                 Label("Privado por natureza", systemImage: "lock").font(.headline)
                 Text("Os títulos e as prévias ficam no seu Mac. Nenhum conteúdo das suas janelas é enviado a um servidor.").foregroundStyle(palette.secondary)

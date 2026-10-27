@@ -7,6 +7,7 @@ private let tabKeyCode: Int64 = 48
 private let returnKeyCode: Int64 = 36
 private let deleteKeyCode: Int64 = 51
 private let escapeKeyCode: Int64 = 53
+private let qKeyCode: Int64 = 12
 private let leftShiftKeyCode: Int64 = 56
 private let rightShiftKeyCode: Int64 = 60
 private let leftArrowKeyCode: Int64 = 123
@@ -62,13 +63,21 @@ private func taberEventTapCallback(
         return Unmanaged.passUnretained(event)
     }
 
+    let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+    if keyCode == qKeyCode, monitor.isQuitKeyHeldForEventTap {
+        if type == .keyUp { monitor.isQuitKeyHeldForEventTap = false }
+        return nil
+    }
+
     if (type == .leftMouseDown || type == .rightMouseDown),
        monitor.isSearchDetachedForEventTap {
         DispatchQueue.main.async { monitor.cancelCycle() }
         return Unmanaged.passUnretained(event)
     }
 
-    let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+    if type == .leftMouseDown || type == .rightMouseDown || (type == .keyDown && !monitor.isCycleActiveForEventTap) {
+        DispatchQueue.main.async { monitor.cancelPendingActivation() }
+    }
     let commandPressed = event.flags.contains(.maskCommand)
 
     if type == .keyDown, commandPressed, keyCode == tabKeyCode {
@@ -82,6 +91,15 @@ private func taberEventTapCallback(
        (commandPressed || monitor.isSearchActiveForEventTap),
        monitor.isCycleActiveForEventTap {
         DispatchQueue.main.async { monitor.handleEscape() }
+        return nil
+    }
+
+    if type == .keyDown,
+       commandPressed,
+       keyCode == qKeyCode,
+       monitor.isCycleActiveForEventTap {
+        monitor.isQuitKeyHeldForEventTap = true
+        DispatchQueue.main.async { monitor.quitSelectedApplication() }
         return nil
     }
 
@@ -145,9 +163,7 @@ private func taberEventTapCallback(
     if type == .flagsChanged, !commandPressed {
         // FIFO delivery: decide after preceding search/navigation events.
         DispatchQueue.main.async {
-            if monitor.isSearchActiveForEventTap, monitor.keepSearchOpenForEventTap {
-                monitor.detachSearchFromCommand()
-            } else { monitor.finishCycle() }
+            monitor.handleCommandRelease()
         }
     }
 
@@ -164,6 +180,17 @@ final class GlobalShortcutMonitor: ObservableObject {
         }
     }
 
+    private let history: WindowRecencyHistory
+    private var waitingForSnapshot = false
+    private var pendingCommands: [PendingCycleCommand] = []
+    private var commitWhenReady = false
+    private var replayingColdCommands = false
+    private var cycleGeneration: UInt = 0
+    private var cycleStartedAt: TimeInterval = 0
+    private enum PendingCycleCommand {
+        case advance(Bool), navigate(Int64), search, searchInput(Int64, String)
+        case moveSearch(Bool), exitSearch, detachSearch
+    }
     private let windowManager: WindowManager
     private let settings: SettingsStore
     private let panelController: SwitcherPanelController
@@ -182,17 +209,21 @@ final class GlobalShortcutMonitor: ObservableObject {
     nonisolated(unsafe) fileprivate private(set) var isSearchDetachedForEventTap = false
     nonisolated(unsafe) fileprivate private(set) var searchShortcutForEventTap: SearchShortcut = .doubleShift
     nonisolated(unsafe) fileprivate private(set) var keepSearchOpenForEventTap = true
+    nonisolated(unsafe) fileprivate var isQuitKeyHeldForEventTap = false
     private var retryTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
     private let logger = Logger(subsystem: "com.taber.app", category: "shortcut")
     private let now: () -> TimeInterval
     private let activate: (WindowInfo) -> Void
+    private let terminateApplication: (WindowInfo) -> Bool
+    fileprivate let cancelPendingActivation: () -> Void
     private let additionalWindows: () -> [WindowInfo]
     private let activateLocally: (WindowInfo) -> Bool
     private let commandIsPressed: () -> Bool
     var onCycleWillStart: () -> Void = {}
 
     init(windowManager: WindowManager, settings: SettingsStore, panelController: SwitcherPanelController,
+         history: WindowRecencyHistory = WindowRecencyHistory(),
          initialState: ShortcutMonitorState = .disabled,
          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
          commandIsPressed: @escaping () -> Bool = {
@@ -200,7 +231,23 @@ final class GlobalShortcutMonitor: ObservableObject {
          },
          additionalWindows: @escaping () -> [WindowInfo] = { [] },
          activateLocally: @escaping (WindowInfo) -> Bool = { _ in false },
+         cancelPendingActivation: @escaping () -> Void = { AccessibilityService.cancelPendingRestoration() },
+         terminateApplication: @escaping (WindowInfo) -> Bool = { window in
+             guard let application = NSRunningApplication(processIdentifier: window.activationPID),
+                   !application.isTerminated,
+                   WindowMatchingPolicy.canTerminateApplication(
+                       expectedPID: window.activationPID,
+                       expectedBundleIdentifier: window.bundleIdentifier,
+                       expectedLaunchDate: window.activationProcessLaunchDate,
+                       actualPID: application.processIdentifier,
+                       actualBundleIdentifier: application.bundleIdentifier,
+                       actualLaunchDate: application.launchDate
+                   ) else { return false }
+             return application.terminate()
+         },
          activate: ((WindowInfo) -> Void)? = nil) {
+        self.cancelPendingActivation = cancelPendingActivation
+        self.history = history
         self.windowManager = windowManager
         self.settings = settings
         self.panelController = panelController
@@ -209,7 +256,9 @@ final class GlobalShortcutMonitor: ObservableObject {
         self.commandIsPressed = commandIsPressed
         self.additionalWindows = additionalWindows
         self.activateLocally = activateLocally
+        self.terminateApplication = terminateApplication
         self.activate = activate ?? { windowManager.activate($0) }
+        windowManager.onSnapshot = { [weak self] windows in self?.receiveSnapshot(windows) }
         searchShortcutForEventTap = settings.searchShortcut
         keepSearchOpenForEventTap = settings.keepSearchOpen
 
@@ -348,12 +397,60 @@ final class GlobalShortcutMonitor: ObservableObject {
     func beginOrAdvanceCycle(reverse: Bool) {
         guard settings.shortcutEnabled, state == .active else { return }
 
+        if waitingForSnapshot {
+            guard !commitWhenReady else { return }
+            if pendingCommands.count < 256 { pendingCommands.append(.advance(reverse)) }
+            return
+        }
         if !isCycling {
-            onCycleWillStart()
-            AccessibilityService.cancelPendingRestoration()
-            windowManager.refresh(includeUtilityWindows: settings.includeUtilityWindows)
+            if !replayingColdCommands {
+                cycleStartedAt = now()
+                onCycleWillStart()
+                cancelPendingActivation()
+                if !windowManager.hasSnapshot { windowManager.refresh(includeUtilityWindows: settings.includeUtilityWindows) }
+            }
+            if !windowManager.hasSnapshot {
+                waitingForSnapshot = true
+                isCycleActiveForEventTap = true
+                pendingCommands = [.advance(reverse)]
+                commitWhenReady = false
+                let generation = cycleGeneration
+                windowManager.requestRefresh(includeUtilityWindows: settings.includeUtilityWindows) { [weak self] in
+                    guard let self, self.waitingForSnapshot, self.cycleGeneration == generation else { return }
+                    let commands = self.pendingCommands
+                    let commit = self.commitWhenReady
+                    self.waitingForSnapshot = false; self.pendingCommands = []; self.commitWhenReady = false
+                    self.replayingColdCommands = true
+                    defer { self.replayingColdCommands = false }
+                    for command in commands {
+                        switch command {
+                        case let .advance(reverse): self.beginOrAdvanceCycle(reverse: reverse)
+                        case let .navigate(key): self.navigate(using: key)
+                        case .search: self.enterSearch()
+                        case let .searchInput(key, text): self.handleSearchInput(keyCode: key, text: text)
+                        case let .moveSearch(reverse): self.moveSearchSelection(reverse: reverse)
+                        case .exitSearch: self.exitSearch()
+                        case .detachSearch: self.detachSearchFromCommand()
+                        }
+                    }
+                    if commit { self.finishCycle() }
+                    if !self.isCycling {
+                        // finishCycle may have just started a pending activation.
+                        // Clearing the overlay must not cancel that transaction.
+                        self.isCycleActiveForEventTap = false
+                        self.isSearchActiveForEventTap = false
+                        self.isSearchDetachedForEventTap = false
+                    }
+                }
+                scheduleCommandReleaseWatchdog()
+                return
+            }
             let localWindows = additionalWindows()
+            let frontmostApplication = NSWorkspace.shared.frontmostApplication
             let current = localWindows.first(where: \.isAccessibilityFocused)
+                ?? history.current(in: windowManager.windows,
+                    frontmostPID: frontmostApplication?.processIdentifier,
+                    launchDate: frontmostApplication?.launchDate)
                 ?? windowManager.frontmostWindow()
             allCycleWindows = orderedWindows(
                 windowManager.windows + localWindows,
@@ -380,6 +477,13 @@ final class GlobalShortcutMonitor: ObservableObject {
                 transparencyPercent: settings.transparencyPercent,
                 keepSearchOpen: settings.keepSearchOpen
             )
+            TaberDiagnostics.record("panelOpened", fields: ["elapsedMs": (now() - cycleStartedAt) * 1000,
+                "count": cycleWindows.count, "snapshotReady": !replayingColdCommands,
+                "snapshotSource": replayingColdCommands ? "cold" : "warm"])
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.settings.shortcutEnabled else { return }
+                self.windowManager.requestRefresh(includeUtilityWindows: self.settings.includeUtilityWindows)
+            }
             scheduleCommandReleaseWatchdog()
         } else {
             moveSelection(by: reverse ? -1 : 1)
@@ -387,6 +491,11 @@ final class GlobalShortcutMonitor: ObservableObject {
     }
 
     func navigate(using keyCode: Int64) {
+        if waitingForSnapshot {
+            guard !commitWhenReady else { return }
+            if pendingCommands.count < 256 { pendingCommands.append(.navigate(keyCode)) }
+            return
+        }
         guard isCycling, !cycleWindows.isEmpty else { return }
 
         let delta: Int?
@@ -417,11 +526,16 @@ final class GlobalShortcutMonitor: ObservableObject {
 
     func moveSearchSelection(reverse: Bool) {
         guard isSearchActiveForEventTap else { return }
+        if waitingForSnapshot {
+            guard !commitWhenReady else { return }
+            if pendingCommands.count < 256 { pendingCommands.append(.moveSearch(reverse)) }
+            return
+        }
         moveSelection(by: reverse ? -1 : 1)
     }
 
     func handleSearchShiftPress() {
-        guard isCycling,
+        guard isCycling || waitingForSnapshot,
               !isSearchActiveForEventTap,
               settings.searchShortcut == .doubleShift
         else { return }
@@ -436,6 +550,14 @@ final class GlobalShortcutMonitor: ObservableObject {
     }
 
     func enterSearch() {
+        if waitingForSnapshot {
+            guard !commitWhenReady, !isSearchActiveForEventTap, pendingCommands.count < 256 else { return }
+            pendingCommands.append(.search)
+            isSearchActiveForEventTap = true
+            isSearchDetachedForEventTap = false
+            lastSearchShiftPress = nil
+            return
+        }
         guard isCycling, !isSearchActiveForEventTap else { return }
         isSearchActiveForEventTap = true
         isSearchDetachedForEventTap = false
@@ -450,7 +572,13 @@ final class GlobalShortcutMonitor: ObservableObject {
     }
 
     func handleSearchInput(keyCode: Int64, text: String) {
-        guard isCycling, isSearchActiveForEventTap else { return }
+        guard (isCycling || waitingForSnapshot), isSearchActiveForEventTap else { return }
+        if waitingForSnapshot {
+            guard !commitWhenReady else { return }
+            if keyCode == returnKeyCode { finishCycle(); return }
+            if pendingCommands.count < 256 { pendingCommands.append(.searchInput(keyCode, text)) }
+            return
+        }
 
         switch keyCode {
         case returnKeyCode:
@@ -473,7 +601,9 @@ final class GlobalShortcutMonitor: ObservableObject {
     }
 
     func handleEscape() {
-        if isSearchDetachedForEventTap {
+        if waitingForSnapshot && commitWhenReady {
+            cancelCycle()
+        } else if isSearchDetachedForEventTap {
             cancelCycle()
         } else if isSearchActiveForEventTap {
             exitSearch()
@@ -483,11 +613,17 @@ final class GlobalShortcutMonitor: ObservableObject {
     }
 
     func detachSearchFromCommand() {
-        guard isCycling,
+        guard isCycling || waitingForSnapshot,
               isSearchActiveForEventTap,
               settings.keepSearchOpen,
               !isSearchDetachedForEventTap
         else { return }
+        if waitingForSnapshot {
+            guard !commitWhenReady, pendingCommands.count < 256 else { return }
+            pendingCommands.append(.detachSearch)
+            isSearchDetachedForEventTap = true
+            return
+        }
         isSearchDetachedForEventTap = true
         panelController.detachSearchFromCommand()
     }
@@ -513,6 +649,13 @@ final class GlobalShortcutMonitor: ObservableObject {
     }
 
     private func exitSearch() {
+        if waitingForSnapshot {
+            guard !commitWhenReady, pendingCommands.count < 256 else { return }
+            pendingCommands.append(.exitSearch)
+            isSearchActiveForEventTap = false
+            isSearchDetachedForEventTap = false
+            return
+        }
         let selectedWindowID = cycleWindows.indices.contains(selectedIndex)
             ? cycleWindows[selectedIndex].id
             : nil
@@ -535,6 +678,13 @@ final class GlobalShortcutMonitor: ObservableObject {
     }
 
     func cancelCycle() {
+        cycleGeneration &+= 1
+        waitingForSnapshot = false; pendingCommands = []; commitWhenReady = false
+        isCycleActiveForEventTap = false
+        isSearchActiveForEventTap = false
+        isSearchDetachedForEventTap = false
+        lastSearchShiftPress = nil
+        cancelPendingActivation()
         commandReleaseWatchdog?.cancel()
         commandReleaseWatchdog = nil
         guard isCycling else {
@@ -553,14 +703,36 @@ final class GlobalShortcutMonitor: ObservableObject {
     }
 
     private func orderedWindows(_ ordered: [WindowInfo], startingAt current: WindowInfo?) -> [WindowInfo] {
-        guard let currentID = current?.id,
-              let currentIndex = ordered.firstIndex(where: { $0.id == currentID }) else {
-            return ordered
+        history.ordered(ordered, current: current)
+    }
+
+    private func receiveSnapshot(_ windows: [WindowInfo]) {
+        guard isCycling, !waitingForSnapshot else { return }
+        let latest = windows + additionalWindows()
+        let live = Dictionary(latest.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let selected = cycleWindows.indices.contains(selectedIndex) ? cycleWindows[selectedIndex].id : nil
+        if let selected, live[selected] == nil { cancelCycle(); return }
+        let existingIDs = Set(allCycleWindows.map(\.id))
+        allCycleWindows = allCycleWindows.compactMap { live[$0.id] } + latest.filter { !existingIDs.contains($0.id) }
+        if panelController.model.isSearching {
+            applySearchQuery()
+        } else {
+            cycleWindows = allCycleWindows
+            selectedIndex = selected.flatMap { id in cycleWindows.firstIndex { $0.id == id } } ?? 0
+            panelController.updateWindowList(windows: cycleWindows, selectedIndex: selectedIndex)
         }
-        return Array(ordered[currentIndex...]) + Array(ordered[..<currentIndex])
+    }
+
+    func handleCommandRelease() {
+        if isSearchActiveForEventTap, settings.keepSearchOpen {
+            detachSearchFromCommand()
+        } else {
+            finishCycle()
+        }
     }
 
     func finishCycle() {
+        if waitingForSnapshot { commitWhenReady = true; return }
         guard isCycling else { return }
         commandReleaseWatchdog?.cancel()
         commandReleaseWatchdog = nil
@@ -591,17 +763,51 @@ final class GlobalShortcutMonitor: ObservableObject {
         }
     }
 
+    /// Command-Q applies to the selected destination while the switcher owns
+    /// the shortcut. It never activates that destination first.
+    func quitSelectedApplication() {
+        guard isCycling || waitingForSnapshot else { return }
+        // There is no stable selected target during a cold collection. Treat
+        // Command-Q as a cancellation so Command release cannot activate one.
+        guard cycleWindows.indices.contains(selectedIndex) else {
+            cancelCycle()
+            return
+        }
+        let selectedWindow = cycleWindows[selectedIndex]
+        cycleGeneration &+= 1
+        waitingForSnapshot = false
+        pendingCommands = []
+        commitWhenReady = false
+        commandReleaseWatchdog?.cancel()
+        commandReleaseWatchdog = nil
+        isCycling = false
+        isCycleActiveForEventTap = false
+        isSearchActiveForEventTap = false
+        isSearchDetachedForEventTap = false
+        allCycleWindows = []
+        cycleWindows = []
+        searchQuery = ""
+        lastSearchShiftPress = nil
+        cancelPendingActivation()
+        panelController.hide()
+        let terminated = terminateApplication(selectedWindow)
+        TaberDiagnostics.record("selectedApplicationQuit", fields: [
+            "target": TaberDiagnostics.identity(selectedWindow),
+            "activationPID": selectedWindow.activationPID,
+            "sent": terminated
+        ])
+        logger.notice("Encerramento solicitado: pid=\(selectedWindow.activationPID) enviado=\(terminated)")
+    }
+
     private func scheduleCommandReleaseWatchdog() {
         commandReleaseWatchdog?.cancel()
-        guard isCycling, !isSearchDetachedForEventTap else { return }
+        guard (isCycling || waitingForSnapshot), !isSearchDetachedForEventTap else { return }
         let workItem = DispatchWorkItem { [weak self] in
-            guard let self, self.isCycling, !self.isSearchDetachedForEventTap else { return }
+            guard let self, (self.isCycling || self.waitingForSnapshot), !self.isSearchDetachedForEventTap else { return }
             if self.commandIsPressed() {
                 self.scheduleCommandReleaseWatchdog()
-            } else if self.isSearchActiveForEventTap, self.settings.keepSearchOpen {
-                self.detachSearchFromCommand()
             } else {
-                self.finishCycle()
+                self.handleCommandRelease()
             }
         }
         commandReleaseWatchdog = workItem
@@ -611,6 +817,7 @@ final class GlobalShortcutMonitor: ObservableObject {
     private func tearDownEventTap() {
         commandReleaseWatchdog?.cancel()
         commandReleaseWatchdog = nil
+        isQuitKeyHeldForEventTap = false
         isCycleActiveForEventTap = false
         isSearchActiveForEventTap = false
         isSearchDetachedForEventTap = false

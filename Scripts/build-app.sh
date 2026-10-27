@@ -43,7 +43,11 @@ mkdir -p "$projectRoot/Build"
 xattr -cr "$builtAppPath"
 codesign --force --deep --sign "$signingIdentity" --identifier com.taber.app "$builtAppPath" >/dev/null
 codesign --verify --deep --strict "$builtAppPath"
-lipo "$builtAppPath/Contents/MacOS/Taber" -verify_arch arm64 x86_64
+builtArchitectures="$(lipo -archs "$builtAppPath/Contents/MacOS/Taber")"
+if [[ " $builtArchitectures " != *" arm64 "* || " $builtArchitectures " != *" x86_64 "* ]]; then
+  print -u2 "Erro: build universal incompleta: $builtArchitectures"
+  exit 1
+fi
 
 # Um .app armazenado diretamente no iCloud Drive recebe atributos FileProvider
 # que invalidam a verificação estrita do codesign. O produto distribuível fica

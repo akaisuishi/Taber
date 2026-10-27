@@ -1,16 +1,21 @@
 import AppKit
+import ApplicationServices
 import XCTest
 
 @MainActor
 final class FixtureSource: WindowSnapshotSource {
     var complete = false
-    func accessibilitySnapshotIsComplete(for pid: pid_t) -> Bool { complete || !ax.isEmpty }
+    var completenessOverride: Bool?
+    func accessibilitySnapshotIsComplete(for pid: pid_t) -> Bool {
+        completenessOverride ?? (complete || !(axByPID[pid] ?? ax).isEmpty)
+    }
     var frontmostPID: pid_t? = 42
     var raw: [WindowInfo] = []
     var ax: [AccessibilityWindowSnapshot] = []
+    var axByPID: [pid_t: [AccessibilityWindowSnapshot]] = [:]
     var locations: [CGWindowID: ResolvedWindowSpace] = [:]
     func candidates(includeUtilityWindows: Bool) -> [WindowInfo] { raw }
-    func accessibilityWindows(for pid: pid_t, includeUtilityWindows: Bool) -> [AccessibilityWindowSnapshot] { ax }
+    func accessibilityWindows(for pid: pid_t, includeUtilityWindows: Bool) -> [AccessibilityWindowSnapshot] { axByPID[pid] ?? ax }
     func spaces(for ids: [CGWindowID]) -> [CGWindowID: ResolvedWindowSpace] { locations }
 }
 
@@ -25,10 +30,11 @@ final class ManualActivationClock: ActivationClock {
 final class FixtureDriver: WindowActivationDriving {
     var confirmationState: WindowActivationConfirmation = .pending
     func confirmation(of window: WindowInfo) -> WindowActivationConfirmation { exists ? confirmationState : .missing }
+    var resolution: WindowResolution?
     var exists = true
     var isMinimized = true
     var operations: [String] = []
-    func resolve(_ window: WindowInfo) -> Bool { operations.append("resolve"); return exists }
+    func resolve(_ window: WindowInfo) -> WindowResolution { operations.append("resolve"); return resolution ?? (exists ? .found : .absent) }
     func restore() { operations.append("restore") }
     func focus() { operations.append("focus") }
     func activateApplication() { operations.append("activate") }
@@ -37,10 +43,12 @@ final class FixtureDriver: WindowActivationDriving {
 @MainActor
 final class ApplicationFixtureDriver: WindowActivationDriving,
     ApplicationOnlyActivationDriving, ProcessValidatingActivationDriving {
-    func confirmation(of window: WindowInfo) -> WindowActivationConfirmation { .confirmed }
+    var confirmationState: WindowActivationConfirmation = .confirmed
+    func confirmation(of window: WindowInfo) -> WindowActivationConfirmation { confirmationState }
     var processIsValid = true
     var applicationTargetIsValid = true
     var isMinimized = false
+    var resolution: WindowResolution = .absent
     var operations: [String] = []
 
     func validateProcess(_ window: WindowInfo) -> Bool {
@@ -51,9 +59,9 @@ final class ApplicationFixtureDriver: WindowActivationDriving,
         operations.append("validate-application")
         return applicationTargetIsValid
     }
-    func resolve(_ window: WindowInfo) -> Bool {
+    func resolve(_ window: WindowInfo) -> WindowResolution {
         operations.append("resolve")
-        return false
+        return resolution
     }
     func restore() { operations.append("restore") }
     func focus() { operations.append("focus") }
@@ -114,6 +122,64 @@ final class WindowWorkflowTests: XCTestCase {
         XCTAssertTrue(p.model.windows.isEmpty)
         m.finishCycle(); m.cancelCycle()
     }
+    func test01aQuitSelectedApplicationDoesNotActivateItFirst() async {
+        let source = FixtureSource()
+        source.raw = [window(1), window(2, pid: 84)]
+        source.ax = [ax(1, focused: true), ax(2)]
+        let defaults = UserDefaults(suiteName: "com.taber.tests.quit.\(UUID().uuidString)")!
+        let settings = SettingsStore(defaults: defaults)
+        let panel = SwitcherPanelController(); panel.model.isDemo = true
+        var activated: WindowInfo?
+        var terminated: WindowInfo?
+        let monitor = GlobalShortcutMonitor(windowManager: WindowManager(source: source), settings: settings,
+            panelController: panel, initialState: .active, commandIsPressed: { true },
+            terminateApplication: { terminated = $0; return true }, activate: { activated = $0 })
+
+        monitor.beginOrAdvanceCycle(reverse: false)
+        let expected = panel.model.windows[panel.model.selectedIndex].id
+        monitor.quitSelectedApplication()
+
+        XCTAssertEqual(terminated?.id, expected)
+        XCTAssertNil(activated)
+        XCTAssertFalse(panel.isShowingDemo)
+        monitor.handleCommandRelease()
+        XCTAssertNil(activated)
+    }
+    func test01bQuitDuringColdCollectionCancelsInsteadOfActivating() async {
+        let source = FixtureSource()
+        source.raw = [window(1), window(2)]
+        source.ax = [ax(1, focused: true), ax(2)]
+        var publications: [@MainActor () -> Void] = []
+        let manager = WindowManager(source: source, snapshotScheduler: { publications.append($0) })
+        let settings = SettingsStore(defaults: UserDefaults(suiteName: "com.taber.tests.quit-cold.\(UUID().uuidString)")!)
+        let panel = SwitcherPanelController(); panel.model.isDemo = true
+        var activated = false, terminated = false
+        let monitor = GlobalShortcutMonitor(windowManager: manager, settings: settings, panelController: panel,
+            initialState: .active, commandIsPressed: { true }, terminateApplication: { _ in terminated = true; return true },
+            activate: { _ in activated = true })
+        monitor.beginOrAdvanceCycle(reverse: false)
+        XCTAssertFalse(publications.isEmpty)
+        monitor.quitSelectedApplication()
+        publications.removeFirst()()
+        monitor.handleCommandRelease()
+        XCTAssertFalse(activated)
+        XCTAssertFalse(terminated)
+    }
+    func test01cQuitRejectsReusedPID() async {
+        let birth = Date(timeIntervalSince1970: 100)
+        let target = WindowInfo(id: 8, ownerPID: 80, bundleIdentifier: "com.fixture.target",
+            applicationName: "Target", title: "", bounds: rect, isOnScreen: true, isMinimized: false,
+            icon: nil, processLaunchDate: birth, activationPID: 81, activationProcessLaunchDate: birth)
+        XCTAssertFalse(WindowMatchingPolicy.canTerminateApplication(expectedPID: target.activationPID,
+            expectedBundleIdentifier: target.bundleIdentifier, expectedLaunchDate: target.activationProcessLaunchDate, actualPID: 81,
+            actualBundleIdentifier: "com.fixture.target", actualLaunchDate: Date(timeIntervalSince1970: 101)))
+        XCTAssertFalse(WindowMatchingPolicy.canTerminateApplication(expectedPID: target.activationPID,
+            expectedBundleIdentifier: target.bundleIdentifier, expectedLaunchDate: target.activationProcessLaunchDate, actualPID: 81,
+            actualBundleIdentifier: "com.other", actualLaunchDate: birth))
+        XCTAssertTrue(WindowMatchingPolicy.canTerminateApplication(expectedPID: target.activationPID,
+            expectedBundleIdentifier: target.bundleIdentifier, expectedLaunchDate: target.activationProcessLaunchDate, actualPID: 81,
+            actualBundleIdentifier: "com.fixture.target", actualLaunchDate: birth))
+    }
     func test02OneWindowUsesOneCellAcrossAllSizesAndStyles() async {
         for style in SwitcherStyle.allCases { for size in SwitcherSize.allCases {
             let one = SwitcherPanelController.requestedSize(for: style, windows: [window()], metrics: .init(size: size), isSearching: false)
@@ -163,6 +229,28 @@ final class WindowWorkflowTests: XCTestCase {
         c.activate(window(2, minimized: true))
         XCTAssertTrue(a.operations.isEmpty)
         XCTAssertTrue(b.operations.contains("restore"))
+    }
+    func test11aMinimizedApplicationOnlyTargetRestoresThroughAX() async {
+        let driver = ApplicationFixtureDriver()
+        driver.isMinimized = true
+        driver.resolution = .found
+        let minimizedRenderer = window(minimized: true, mode: .activateApplication)
+        let result = WindowActivationCoordinator(clock: ManualActivationClock()) { _ in driver }
+            .activate(minimizedRenderer)
+        XCTAssertEqual(result.strategy, .accessibilityWindow)
+        XCTAssertEqual(driver.operations, ["validate-process", "resolve", "restore", "focus", "activate"])
+    }
+    func test11bImmediateCommandMUsesCurrentAXMinimizedStateBeforeSnapshotRefresh() async {
+        // The cycle snapshot still says visible, but AX has already observed
+        // Command-M. Activation must restore the selected AX target instead
+        // of treating its vanished CG surface as a closed window.
+        let driver = FixtureDriver()
+        driver.isMinimized = true
+        let staleVisibleSnapshot = window(minimized: false)
+        let result = WindowActivationCoordinator(clock: ManualActivationClock()) { _ in driver }
+            .activate(staleVisibleSnapshot)
+        XCTAssertEqual(result.outcome, .requested)
+        XCTAssertEqual(driver.operations, ["resolve", "restore", "focus", "activate"])
     }
     func test12OldRestoreCannotStealNewSelection() async {
         let clock = ManualActivationClock(), a = FixtureDriver(), b = FixtureDriver()
@@ -448,7 +536,7 @@ final class WindowWorkflowTests: XCTestCase {
         let result = WindowActivationCoordinator(clock: ManualActivationClock()) { _ in driver }.activate(game)
 
         XCTAssertEqual(result.strategy, .application)
-        XCTAssertTrue(result.succeeded)
+        XCTAssertEqual(result.outcome, .requested)
         XCTAssertEqual(driver.operations,
             ["validate-process", "validate-application", "activate"])
         XCTAssertFalse(driver.operations.contains("resolve"))
@@ -479,12 +567,11 @@ final class WindowWorkflowTests: XCTestCase {
         let coordinator = WindowActivationCoordinator(clock: clock) { _ in driver }
         let result = coordinator.activate(window(minimized: true))
 
-        XCTAssertEqual(result.steps, [.targetResolved, .restored, .applicationActivated,
-            .focusedAndRaised, .retryScheduled])
-        XCTAssertEqual(driver.operations, ["resolve", "restore", "activate", "focus"])
+        XCTAssertEqual(result.steps, [.targetResolved, .restored, .focusedAndRaised, .applicationActivated, .retryScheduled])
+        XCTAssertEqual(driver.operations, ["resolve", "restore", "focus", "activate"])
         clock.advance()
         XCTAssertEqual(driver.operations,
-            ["resolve", "restore", "activate", "focus", "resolve", "restore", "activate", "focus"])
+            ["resolve", "restore", "focus", "activate", "resolve", "restore", "focus", "activate"])
     }
 
     func test66SheetsDialogsAndUtilitiesFollowExplicitEvidencePolicy() async {
@@ -529,7 +616,7 @@ final class WindowWorkflowTests: XCTestCase {
         driver.confirmationState = .confirmed
         let result = WindowActivationCoordinator(clock: ManualActivationClock()) { _ in driver }
             .activate(protectedWindow)
-        XCTAssertTrue(result.succeeded)
+        XCTAssertEqual(result.outcome, .requested)
         XCTAssertEqual(driver.operations, ["resolve", "activate"])
     }
 
@@ -630,8 +717,8 @@ final class WindowWorkflowTests: XCTestCase {
 
         manager.refresh()
 
-        XCTAssertEqual(manager.windows.count, 1,
-            "Superfícies sem identidade individual defensável devem representar um único alvo de aplicativo")
+        XCTAssertEqual(manager.windows.count, 2,
+            "IDs distintos sem título continuam sendo alvos distintos")
         XCTAssertEqual(manager.windows.first?.activationMode, .activateApplication)
     }
 
@@ -672,10 +759,10 @@ final class WindowWorkflowTests: XCTestCase {
         let result = coordinator.activate(window(2, title: "Destino", onScreen: false, pid: 84))
 
         XCTAssertEqual(result.outcome, .requested)
-        XCTAssertEqual(result.steps, [.targetResolved, .applicationActivated, .focusedAndRaised, .retryScheduled])
-        XCTAssertEqual(driver.operations, ["resolve", "activate", "focus"])
+        XCTAssertEqual(result.steps, [.targetResolved, .focusedAndRaised, .applicationActivated, .retryScheduled])
+        XCTAssertEqual(driver.operations, ["resolve", "focus", "activate"])
         clock.advance()
-        XCTAssertEqual(driver.operations, ["resolve", "activate", "focus", "resolve", "activate", "focus"])
+        XCTAssertEqual(driver.operations, ["resolve", "focus", "activate", "resolve", "focus", "activate"])
     }
 
     func testFinderCompleteEmptySnapshotRemovesGhostEvenInBackground() async {
@@ -845,6 +932,184 @@ final class WindowWorkflowTests: XCTestCase {
         }
     }
 
+    func testTransientFirstResolutionRetriesBeforeAnyActivation() async {
+        let driver = FixtureDriver(); driver.resolution = .temporarilyUnavailable
+        let clock = ManualActivationClock()
+        let coordinator = WindowActivationCoordinator(clock: clock, now: { 0 }) { _ in driver }
+        var last: WindowActivationResult?
+        coordinator.onResult = { last = $0 }
+        XCTAssertEqual(coordinator.activate(window()).outcome, .requested)
+        XCTAssertEqual(driver.operations, ["resolve"])
+        driver.resolution = .found; clock.advance()
+        XCTAssertEqual(driver.operations, ["resolve", "resolve", "restore", "focus", "activate"])
+        driver.confirmationState = .confirmed; clock.advance()
+        XCTAssertEqual(last?.outcome, .activated)
+    }
+
+    func testAmbiguousResolutionNeverActivatesSibling() async {
+        let driver = FixtureDriver(); driver.resolution = .ambiguous
+        let coordinator = WindowActivationCoordinator(clock: ManualActivationClock()) { _ in driver }
+        XCTAssertEqual(coordinator.activate(window()).outcome, .rejected(.ambiguousTarget))
+        XCTAssertEqual(driver.operations, ["resolve"])
+    }
+
+    func testDeadlineStopsEvenIfTimerCountHasNotBeenExhausted() async {
+        let driver = FixtureDriver(); driver.resolution = .temporarilyUnavailable
+        let clock = ManualActivationClock(); var time: TimeInterval = 0
+        let coordinator = WindowActivationCoordinator(clock: clock, now: { time }) { _ in driver }
+        var last: WindowActivationResult?
+        coordinator.onResult = { last = $0 }
+        coordinator.activate(window()); time = 2.1; clock.advance()
+        XCTAssertEqual(last?.outcome, .rejected(.timedOut))
+        XCTAssertEqual(driver.operations, ["resolve"])
+        XCTAssertTrue(clock.pending.isEmpty)
+    }
+
+    func testApplicationEvidenceIsNotReportedAsWindowFocus() async {
+        let driver = FixtureDriver(); driver.confirmationState = .applicationActivated
+        let clock = ManualActivationClock()
+        let coordinator = WindowActivationCoordinator(clock: clock) { _ in driver }
+        var last: WindowActivationResult?
+        coordinator.onResult = { last = $0 }
+        coordinator.activate(window(mode: .activateApplication)); clock.advance()
+        XCTAssertEqual(last?.outcome, .applicationActivated)
+        XCTAssertEqual(last?.succeeded, false)
+        XCTAssertTrue(clock.pending.isEmpty)
+    }
+
+    func testDiscoveryToActivationCGOnlyUsesApplicationStrategy() async {
+        let (manager, _) = manager([window(71, bundle: "com.fixture.renderer")], [])
+        guard let discovered = manager.windows.first else { return XCTFail("missing renderer") }
+        XCTAssertEqual(discovered.activationMode, .activateApplication)
+        let driver = ApplicationFixtureDriver(); let clock = ManualActivationClock()
+        let coordinator = WindowActivationCoordinator(clock: clock) { _ in driver }
+        var last: WindowActivationResult?
+        coordinator.onResult = { last = $0 }
+        coordinator.activate(discovered); clock.advance()
+        XCTAssertEqual(last?.outcome, .activated)
+        XCTAssertFalse(driver.operations.contains("resolve"))
+        XCTAssertFalse(driver.operations.contains("restore"))
+    }
+
+    func testHelperHostIsRecognizedAsCurrentWindow() async {
+        let source = FixtureSource(); source.frontmostPID = 42
+        source.raw = [WindowInfo(id: 901, ownerPID: 84, bundleIdentifier: "com.fixture.host",
+            applicationName: "Host", title: "Renderer", bounds: rect, isOnScreen: true,
+            isMinimized: false, icon: nil, activationPID: 42)]
+        let manager = WindowManager(source: source); manager.refresh()
+        XCTAssertEqual(manager.frontmostWindow()?.windowServerID, 901)
+    }
+
+    func testRecencyUsesObservedWindowFocusAcrossApplications() async {
+        let history = WindowRecencyHistory()
+        let a = window(1), b = window(2), c = window(3, pid: 84)
+        history.touch(b.id); history.touch(c.id); history.touch(a.id)
+        XCTAssertEqual(history.ordered([a,b,c], current: a).map(\.id), [a.id,c.id,b.id])
+        history.purge(keeping: [a.id,b.id])
+        XCTAssertEqual(history.ordered([a,b,c], current: a).map(\.id), [a.id,b.id,c.id])
+    }
+
+    func testObservedMouseFocusOverridesStaleSnapshotAndRejectsRestartedProcess() async {
+        let history = WindowRecencyHistory()
+        let a = window(1), b = window(2)
+        history.observe(pid: 42, birth: nil, windowID: 2, windows: [a,b])
+        XCTAssertEqual(history.current(in: [a,b], frontmostPID: 42, launchDate: nil)?.id, b.id)
+        XCTAssertNil(history.current(in: [a,b], frontmostPID: 84, launchDate: nil))
+        XCTAssertNil(history.current(in: [a,b], frontmostPID: 42, launchDate: Date()))
+        XCTAssertNil(history.current(in: [a], frontmostPID: 42, launchDate: nil))
+    }
+
+    func testOpenCycleKeepsOrderAndCancelsWhenSelectedWindowCloses() async {
+        let source = FixtureSource(); source.raw = [window(), window(2), window(3)]
+        source.ax = [ax(1, focused: true), ax(2), ax(3)]
+        let manager = WindowManager(source: source)
+        let defaults = UserDefaults(suiteName: "com.taber.tests.freeze.\(UUID().uuidString)")!
+        let settings = SettingsStore(defaults: defaults); let panel = SwitcherPanelController(); panel.model.isDemo = true
+        var activated = false
+        let monitor = GlobalShortcutMonitor(windowManager: manager, settings: settings, panelController: panel,
+            initialState: .active, commandIsPressed: { true }, activate: { _ in activated = true })
+        monitor.beginOrAdvanceCycle(reverse: false)
+        source.raw.reverse(); manager.refresh()
+        XCTAssertEqual(panel.model.windows.compactMap(\.windowServerID), [1,2,3])
+        XCTAssertEqual(panel.model.windows[panel.model.selectedIndex].windowServerID, 2)
+        source.raw = [window(),window(3)]; source.ax = [ax(1),ax(3)]
+        manager.refresh(); monitor.finishCycle()
+        XCTAssertFalse(activated)
+    }
+
+    func testAXReferenceCacheKeysIncludeProcessBirthAndWindowID() async {
+        let cache = AXWindowReferenceCache()
+        let element = AXUIElementCreateApplication(42)
+        let date = Date(timeIntervalSince1970: 100)
+        cache.store(element, ownerPID: 42, launchDate: date, windowID: 1)
+        XCTAssertNotNil(cache.element(ownerPID: 42, launchDate: date, windowID: 1))
+        XCTAssertNil(cache.element(ownerPID: 42, launchDate: date.addingTimeInterval(1), windowID: 1))
+        XCTAssertNil(cache.element(ownerPID: 84, launchDate: date, windowID: 1))
+        cache.retain(liveWindows: [1], processes: [42: date.addingTimeInterval(1)])
+        XCTAssertNil(cache.element(ownerPID: 42, launchDate: date, windowID: 1))
+
+        cache.store(element, ownerPID: 77, launchDate: nil, windowID: 9)
+        XCTAssertNotNil(cache.element(ownerPID: 77, launchDate: nil, windowID: 9))
+        XCTAssertNil(cache.element(ownerPID: 77, launchDate: date, windowID: 9))
+        cache.retain(liveWindows: [9], processes: [77: nil])
+        XCTAssertNotNil(cache.element(ownerPID: 77, launchDate: nil, windowID: 9))
+        cache.retain(liveWindows: [9], processes: [:])
+        XCTAssertNil(cache.element(ownerPID: 77, launchDate: nil, windowID: 9))
+    }
+
+    func testIncompleteRefreshPreservesKnownAXActivationAndRevalidatesThroughCoordinator() async {
+        let (manager, source) = manager([window(bundle: "com.taber.fixture")],
+            [ax(1, focused: true, identifier: "document", ordinal: 0)])
+        source.ax = []
+        manager.refresh()
+        let target = manager.windows[0]
+        XCTAssertEqual(target.activationMode, .raiseWindow)
+        XCTAssertEqual(target.accessibilityIdentifier, "document")
+        XCTAssertEqual(target.accessibilityOrdinal, 0)
+        XCTAssertFalse(target.isAccessibilityFocused, "Failed refresh must not recycle stale focus evidence")
+        let driver = FixtureDriver()
+        driver.isMinimized = false
+        driver.confirmationState = .confirmed
+        let coordinator = WindowActivationCoordinator(clock: ManualActivationClock(), driver: { _ in driver })
+        coordinator.activate(target)
+        XCTAssertTrue(driver.operations.contains("resolve"))
+        XCTAssertTrue(driver.operations.contains("focus"))
+    }
+
+    func testIncompleteRefreshRetainsKnownUntitledOffSpaceAXWindow() async {
+        let original = window(title: "", onScreen: false, bundle: "com.taber.fixture")
+        let (manager, source) = manager([original], [ax(1, title: "", identifier: "", ordinal: 0)])
+        source.ax = []
+        manager.refresh()
+        XCTAssertEqual(manager.windows.map(\.id), [original.id])
+        XCTAssertEqual(manager.windows.first?.activationMode, .raiseWindow)
+        XCTAssertEqual(manager.windows.first?.accessibilityOrdinal, 0)
+    }
+
+    func testCompletedEmptyAXRefreshDoesNotRetainPriorStrongStrategy() async {
+        let (manager, source) = manager([window(bundle: "com.taber.fixture")], [ax(1)])
+        source.ax = []
+        source.complete = true
+        manager.refresh()
+        XCTAssertEqual(manager.windows.first?.activationMode, .activateApplication)
+    }
+
+    func testIncompleteRefreshDoesNotPromoteUnknownCGWindowOrRestartedProcess() async {
+        func processWindow(_ birth: Date, _ id: CGWindowID = 1) -> WindowInfo {
+            WindowInfo(id: id, ownerPID: 42, bundleIdentifier: "com.taber.fixture",
+                applicationName: "Fixture", title: "Documento", bounds: rect,
+                isOnScreen: true, isMinimized: false, icon: nil, processLaunchDate: birth)
+        }
+        let birth = Date(timeIntervalSince1970: 100)
+        let (manager, source) = manager([processWindow(birth)], [ax(1)])
+        source.ax = []
+        source.raw = [processWindow(birth, 2), processWindow(birth.addingTimeInterval(1))]
+        manager.refresh()
+        XCTAssertEqual(manager.windows.count, 2)
+        XCTAssertTrue(manager.windows.allSatisfy { $0.activationMode == .activateApplication })
+        XCTAssertTrue(manager.windows.allSatisfy { $0.accessibilityOrdinal == nil })
+    }
+
     func test33RepeatablePerformanceFixture() async {
         let source = FixtureSource()
         source.raw = (1...200).map { window(UInt32($0)) }
@@ -879,5 +1144,502 @@ final class WindowWorkflowTests: XCTestCase {
         XCTAssertEqual(manager.windows.count, 200)
         XCTAssertLessThanOrEqual(medianRefreshMilliseconds, maximumAcceptedRefreshMilliseconds,
             "A mediana repetível de descoberta com 200 janelas regrediu mais de 10% contra a baseline documentada")
+    }
+}
+
+extension WindowWorkflowTests {
+    private func coldSearchMonitor(keepOpen: Bool = true) -> (
+        GlobalShortcutMonitor, SwitcherPanelController, () -> Void, () -> WindowInfo?, () -> Int
+    ) {
+        let source = FixtureSource()
+        source.raw = [window(1, title: "Alpha"), window(2, title: "Beta"), window(3, title: "Beta Two")]
+        source.ax = [ax(1, focused: true, title: "Alpha"), ax(2, title: "Beta"), ax(3, title: "Beta Two")]
+        var publications: [@MainActor () -> Void] = []
+        let manager = WindowManager(source: source, snapshotScheduler: { publications.append($0) })
+        let settings = SettingsStore(defaults: UserDefaults(suiteName: "com.taber.tests.\(UUID().uuidString)")!)
+        settings.keepSearchOpen = keepOpen
+        settings.switcherStyle = .list
+        let panel = SwitcherPanelController(); panel.model.isDemo = true
+        var activated: WindowInfo?
+        var starts = 0
+        let monitor = GlobalShortcutMonitor(windowManager: manager, settings: settings,
+            panelController: panel, initialState: .active, commandIsPressed: { true }, activate: { activated = $0 })
+        monitor.onCycleWillStart = { starts += 1 }
+        return (monitor, panel, {
+            XCTAssertFalse(publications.isEmpty, "Cold path must await real WindowManager publication")
+            if !publications.isEmpty { publications.removeFirst()() }
+        }, { activated }, { starts })
+    }
+
+    func testColdSearchRetainsInputDeleteNavigationAndDetachedRelease() async {
+        let (monitor, panel, publish, activated, starts) = coldSearchMonitor()
+        monitor.beginOrAdvanceCycle(reverse: false)
+        XCTAssertTrue(panel.model.windows.isEmpty)
+        monitor.enterSearch()
+        monitor.handleSearchInput(keyCode: 0, text: "Betax")
+        monitor.handleSearchInput(keyCode: 51, text: "")
+        monitor.handleCommandRelease()
+        monitor.moveSearchSelection(reverse: false)
+        await Task.yield()
+        publish()
+        XCTAssertEqual(starts(), 1)
+        XCTAssertTrue(panel.model.isSearching)
+        XCTAssertTrue(panel.model.isSearchDetached)
+        XCTAssertEqual(panel.model.searchQuery, "Beta")
+        XCTAssertEqual(panel.model.windows.compactMap(\.windowServerID), [2, 3])
+        XCTAssertEqual(panel.model.selectedIndex, 1)
+        XCTAssertNil(activated())
+        monitor.handleSearchInput(keyCode: 36, text: "")
+        XCTAssertEqual(activated()?.windowServerID, 3)
+    }
+
+    func testColdSearchReleaseCommitsFilteredTargetWhenKeepOpenDisabled() async {
+        let (monitor, _, publish, activated, _) = coldSearchMonitor(keepOpen: false)
+        monitor.beginOrAdvanceCycle(reverse: false)
+        monitor.enterSearch()
+        monitor.handleSearchInput(keyCode: 0, text: "Alpha")
+        monitor.handleCommandRelease()
+        await Task.yield()
+        publish()
+        XCTAssertEqual(activated()?.windowServerID, 1)
+    }
+
+    func testColdSearchReturnCommitsOnlyBufferedInput() async {
+        let (monitor, _, publish, activated, _) = coldSearchMonitor()
+        monitor.beginOrAdvanceCycle(reverse: false)
+        monitor.enterSearch()
+        monitor.handleSearchInput(keyCode: 0, text: "Alpha")
+        monitor.handleSearchInput(keyCode: 36, text: "")
+        monitor.handleSearchInput(keyCode: 0, text: "ignored after commit")
+        await Task.yield()
+        publish()
+        XCTAssertEqual(activated()?.windowServerID, 1)
+    }
+
+    func testColdSearchEscapeExitsSearchAndSecondEscapeCancelsPublication() async {
+        let (monitor, panel, publish, activated, _) = coldSearchMonitor()
+        monitor.beginOrAdvanceCycle(reverse: false)
+        monitor.enterSearch()
+        monitor.handleSearchInput(keyCode: 0, text: "Alpha")
+        monitor.handleEscape()
+        await Task.yield()
+        publish()
+        XCTAssertFalse(panel.model.isSearching)
+        XCTAssertEqual(panel.model.windows.count, 3)
+        monitor.cancelCycle()
+        XCTAssertNil(activated())
+
+        let (cancelled, cancelledPanel, publishCancelled, cancelledActivation, _) = coldSearchMonitor()
+        cancelled.beginOrAdvanceCycle(reverse: false)
+        cancelled.enterSearch()
+        cancelled.handleEscape()
+        cancelled.handleEscape()
+        await Task.yield()
+        publishCancelled()
+        XCTAssertTrue(cancelledPanel.model.windows.isEmpty)
+        XCTAssertNil(cancelledActivation())
+    }
+
+    func testColdDoubleShiftSearchDetachedEscapeCancelsAndAllowsNextCycle() async {
+        let (monitor, panel, publish, activated, _) = coldSearchMonitor()
+        monitor.beginOrAdvanceCycle(reverse: false)
+        monitor.handleSearchShiftPress()
+        monitor.handleSearchShiftPress()
+        monitor.handleSearchInput(keyCode: 0, text: "Beta")
+        monitor.handleCommandRelease()
+        monitor.handleEscape()
+        await Task.yield()
+        publish()
+        XCTAssertTrue(panel.model.windows.isEmpty)
+        XCTAssertNil(activated())
+        monitor.beginOrAdvanceCycle(reverse: false)
+        XCTAssertFalse(panel.model.isSearching)
+        XCTAssertFalse(panel.model.isSearchDetached)
+        monitor.cancelCycle()
+    }
+}
+
+
+extension WindowWorkflowTests {
+    func testColdCommandReleaseKeepsActivationAliveThroughConfirmation() async {
+        let source = FixtureSource(); source.raw = [window(1), window(2)]
+        source.ax = [ax(1, focused: true), ax(2)]
+        var publications: [@MainActor () -> Void] = []
+        let manager = WindowManager(source: source, snapshotScheduler: { publications.append($0) })
+        let settings = SettingsStore(defaults: UserDefaults(suiteName: "com.taber.tests.coldCommit.\(UUID().uuidString)")!)
+        let panel = SwitcherPanelController(); panel.model.isDemo = true
+        let clock = ManualActivationClock(), driver = FixtureDriver()
+        let coordinator = WindowActivationCoordinator(clock: clock, driver: { _ in driver })
+        var outcome: WindowActivationResult.Outcome?
+        coordinator.onResult = { outcome = $0.outcome }
+        let monitor = GlobalShortcutMonitor(windowManager: manager, settings: settings, panelController: panel,
+            initialState: .active, commandIsPressed: { true },
+            cancelPendingActivation: { coordinator.cancelPending() }, activate: { coordinator.activate($0) })
+        monitor.beginOrAdvanceCycle(reverse: false)
+        monitor.handleCommandRelease()
+        XCTAssertFalse(publications.isEmpty)
+        publications.removeFirst()()
+        XCTAssertEqual(outcome, .requested)
+        driver.confirmationState = .confirmed
+        clock.advance()
+        XCTAssertEqual(outcome, .activated)
+    }
+}
+
+
+extension WindowWorkflowTests {
+    func testThumbnailOverflowWaitsAndContinuesWhenSlotReleased() async {
+        let queue = ThumbnailCaptureQueue(limit: 1)
+        let token = queue.token
+        let first = await queue.acquire(token)
+        XCTAssertTrue(first)
+        var resumed = false
+        let next = Task { let granted = await queue.acquire(token); resumed = granted; return granted }
+        await Task.yield()
+        XCTAssertFalse(resumed)
+        queue.release()
+        let granted = await next.value
+        XCTAssertTrue(granted)
+        queue.release()
+    }
+
+    func testThumbnailNewPresentationDiscardsQueuedOldWorkWithoutOverbooking() async {
+        let queue = ThumbnailCaptureQueue(limit: 1)
+        let old = queue.token
+        let acquired = await queue.acquire(old)
+        XCTAssertTrue(acquired)
+        let obsolete = Task { await queue.acquire(old) }
+        await Task.yield()
+        queue.begin()
+        let oldGranted = await obsolete.value
+        XCTAssertFalse(oldGranted)
+        var entered = false
+        let next = Task { let granted = await queue.acquire(queue.token); entered = granted; return granted }
+        await Task.yield()
+        XCTAssertFalse(entered)
+        queue.release()
+        let newGranted = await next.value
+        XCTAssertTrue(newGranted)
+        queue.release()
+    }
+}
+
+
+extension WindowWorkflowTests {
+    func testThumbnailRequestIdentityIncludesPlayerAndQuantizesLayout() async {
+        let host = window(1), player = window(1).withPresentation(windowID: 9)
+        let size = CGSize(width: 320, height: 180)
+        XCTAssertNotEqual(WindowThumbnailService.requestKey(host, size), WindowThumbnailService.requestKey(player, size))
+        XCTAssertEqual(WindowThumbnailService.requestKey(host, CGSize(width: 319.1, height: 180)), WindowThumbnailService.requestKey(host, size))
+    }
+}
+
+extension WindowWorkflowTests {
+    func testThumbnailServiceCoalescesAndReusesFreshImages() async throws {
+        let context = CGContext(data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 32,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let image = context.makeImage()!
+        var captures = 0
+        var time: TimeInterval = 0
+        var permitted = true
+        let service = WindowThumbnailService(permission: { permitted }, now: { time }, capture: { _, _ in
+            captures += 1
+            try await Task.sleep(for: .milliseconds(10))
+            return image
+        })
+        let target = window(), size = CGSize(width: 320, height: 180)
+        let first = Task { await service.thumbnail(for: target, targetSize: size, generation: 0) }
+        let second = Task { await service.thumbnail(for: target, targetSize: size, generation: 0) }
+        _ = await first.value; _ = await second.value
+        XCTAssertEqual(captures, 1)
+        for _ in 0..<100 { _ = await service.thumbnail(for: target, targetSize: size, generation: 1) }
+        XCTAssertEqual(captures, 1, "Warm reads must not capture again")
+        time = 2
+        XCTAssertNotNil(service.cachedThumbnail(for: target, targetSize: size))
+        _ = await service.thumbnail(for: target, targetSize: size, generation: 2)
+        XCTAssertEqual(captures, 2)
+        time = 33
+        XCTAssertNil(service.cachedThumbnail(for: target, targetSize: size))
+        permitted = false
+        if case .permissionRequired = await service.thumbnail(for: target, targetSize: size, generation: 3) {} else { XCTFail("Permission must override cached image") }
+    }
+
+    func testThumbnailServiceEventuallyCapturesEveryOverflowRequest() async {
+        let context = CGContext(data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 32,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let image = context.makeImage()!
+        var active = 0, peak = 0, completed = 0
+        let service = WindowThumbnailService(permission: { true }, capture: { _, _ in
+            active += 1; peak = max(peak, active)
+            try await Task.sleep(for: .milliseconds(5))
+            active -= 1; completed += 1
+            return image
+        })
+        let tasks = (1...12).map { id in
+            Task { await service.thumbnail(for: window(UInt32(id)), targetSize: CGSize(width: 320, height: 180), generation: 0) }
+        }
+        for task in tasks { if case .image = await task.value {} else { XCTFail("Overflow must wait rather than lose its image") } }
+        XCTAssertEqual(completed, 12)
+        XCTAssertLessThanOrEqual(peak, 3)
+    }
+}
+
+
+extension WindowWorkflowTests {
+    func testMissingCatalogEntriesDoNotOccupyScreenshotSlots() async {
+        let context = CGContext(data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 32,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let image = context.makeImage()!
+        var waiting: [CheckedContinuation<Void, Never>] = []
+        let prepared = expectation(description: "Three catalog lookups waiting")
+        prepared.expectedFulfillmentCount = 3
+        let service = WindowThumbnailService(permission: { true }, prepare: { window in
+            if window.windowServerID != 4 {
+                await withCheckedContinuation { continuation in waiting.append(continuation); prepared.fulfill() }
+            }
+        }, capture: { _, _ in image })
+        let tasks = (1...3).map { id in Task { await service.thumbnail(for: window(UInt32(id)), targetSize: CGSize(width: 320, height: 180), generation: 0) } }
+        await fulfillment(of: [prepared], timeout: 1)
+        let available = expectation(description: "Available window captured while catalogs wait")
+        let fourth = Task {
+            if case .image = await service.thumbnail(for: window(4), targetSize: CGSize(width: 320, height: 180), generation: 0) { available.fulfill() }
+        }
+        await fulfillment(of: [available], timeout: 1)
+        for continuation in waiting { continuation.resume() }
+        for task in tasks { _ = await task.value }
+        _ = await fourth.value
+    }
+}
+
+
+extension WindowWorkflowTests {
+    func testSafariResidualFullscreenSurfaceCannotHijackNormalHost() async {
+        let host = window(1769, bundle: "com.apple.Safari")
+        let residual = WindowInfo(id: 1985, ownerPID: 42, bundleIdentifier: "com.apple.Safari",
+            applicationName: "Safari", title: "", bounds: CGRect(x: 0, y: 0, width: 2560, height: 1440),
+            isOnScreen: false, isMinimized: false, icon: nil)
+        let (manager, source) = manager([host, residual], [ax(1769, focused: true)])
+        XCTAssertEqual(manager.windows.count, 1)
+        XCTAssertEqual(manager.windows[0].windowServerID, 1769)
+        XCTAssertNil(manager.windows[0].presentationWindowID)
+        XCTAssertFalse(manager.windows[0].isFullScreen)
+        XCTAssertEqual(manager.windows[0].activationMode, .raiseWindow)
+        let driver = FixtureDriver(); driver.isMinimized = false
+        let clock = ManualActivationClock()
+        let coordinator = WindowActivationCoordinator(clock: clock, driver: { _ in driver })
+        coordinator.activate(manager.windows[0])
+        XCTAssertEqual(driver.operations, ["resolve", "focus", "activate"])
+        source.completenessOverride = false
+        manager.refresh()
+        let incompleteHost = manager.windows.first { $0.windowServerID == 1769 }!
+        XCTAssertNil(incompleteHost.presentationWindowID)
+        XCTAssertFalse(incompleteHost.isFullScreen)
+        XCTAssertEqual(incompleteHost.activationMode, .raiseWindow)
+        source.completenessOverride = true
+        // A complete refresh after the residual disappears keeps the same target.
+        source.raw = [host]; manager.refresh()
+        XCTAssertEqual(manager.windows[0].id, host.id)
+    }
+
+    func testConfirmedCGOnlyFullscreenPlayerNeverReplacesVisibleSafariHost() async {
+        let source = FixtureSource()
+        source.raw = [window(1, bundle: "com.apple.Safari"), window(2, full: true, bundle: "com.apple.Safari")]
+        source.ax = [ax(1, focused: true)]
+        source.locations = [2: ResolvedWindowSpace(identifier: 90, number: nil, isFullScreen: true)]
+        let manager = WindowManager(source: source); manager.refresh()
+        let host = manager.windows.first { $0.windowServerID == 1 }!
+        XCTAssertFalse(host.isFullScreen)
+        XCTAssertNil(host.presentationWindowID)
+        XCTAssertEqual(host.activationMode, .raiseWindow)
+        XCTAssertTrue(manager.windows.contains { $0.windowServerID == 2 && $0.isFullScreen })
+    }
+
+    func testActiveSafariFullscreenVideoTransfersFocusAndPrioritizesOtherAppsBeforeOffscreenHost() async {
+        let source = FixtureSource()
+        source.frontmostPID = 42
+        let notchedPlayerBounds = CGRect(x: 0, y: 38, width: 1710, height: 1074)
+        let host = WindowInfo(id: 126, ownerPID: 42, bundleIdentifier: "com.apple.Safari",
+            applicationName: "Safari", title: "YouTube", bounds: rect,
+            isOnScreen: false, isMinimized: false, isFullScreen: false, icon: nil)
+        let player = WindowInfo(id: 270, ownerPID: 42, bundleIdentifier: "com.apple.Safari",
+            applicationName: "Safari", title: "", bounds: notchedPlayerBounds,
+            isOnScreen: true, isMinimized: false, isFullScreen: false, icon: nil)
+        let otherApp = WindowInfo(id: 158, ownerPID: 84, bundleIdentifier: "com.google.antigravity",
+            applicationName: "Antigravity", title: "Taber", bounds: rect,
+            isOnScreen: false, isMinimized: false, isFullScreen: false, icon: nil)
+        source.raw = [player, host, otherApp]
+        source.axByPID = [
+            42: [ax(126, focused: true, title: "YouTube")],
+            84: [ax(158, title: "Taber")]
+        ]
+        source.locations = [
+            126: ResolvedWindowSpace(identifier: 1, number: 1, isFullScreen: false),
+            270: ResolvedWindowSpace(identifier: 58, number: nil, isFullScreen: true),
+            158: ResolvedWindowSpace(identifier: 1, number: 1, isFullScreen: false)
+        ]
+
+        let manager = WindowManager(source: source)
+        manager.refresh()
+
+        let discoveredPlayer = manager.windows.first { $0.windowServerID == 270 }
+        let discoveredHost = manager.windows.first { $0.windowServerID == 126 }
+        XCTAssertNotNil(discoveredPlayer, "Detached fullscreen video surface in fullscreen Space must remain eligible")
+        XCTAssertEqual(discoveredPlayer?.isFullScreen, true)
+        XCTAssertEqual(discoveredPlayer?.presentationWindowID, 270)
+        XCTAssertEqual(discoveredPlayer?.activationMode, .activateApplication)
+        XCTAssertEqual(discoveredPlayer?.isAccessibilityFocused, true)
+        XCTAssertEqual(discoveredHost?.isAccessibilityFocused, false)
+        XCTAssertEqual(manager.frontmostWindow()?.windowServerID, 270)
+
+        let history = WindowRecencyHistory()
+        // Even if AX focus observation reported the host window ID (126), recency current()
+        // must resolve to the on-screen fullscreen player (270) when the host is off-screen.
+        history.observe(pid: 42, birth: nil, windowID: 126, windows: manager.windows)
+        let current = history.current(in: manager.windows, frontmostPID: 42, launchDate: nil)
+        XCTAssertEqual(current?.windowServerID, 270)
+
+        let ordered = history.ordered(manager.windows, current: current)
+        XCTAssertEqual(ordered.compactMap(\.windowServerID), [270, 158, 126],
+            "Command+Tab from fullscreen video must select the other app before the off-screen browser host")
+    }
+
+    func testOffSpaceOmittedWindowActivatesOnlyWhenUnambiguousWhileIPCTimeoutNeverActivatesBlindly() async {
+        // 1. Transient IPC failure (.temporarilyUnavailable) must NEVER activate blindly on retry.
+        let ipcDriver = ApplicationFixtureDriver()
+        ipcDriver.isMinimized = false
+        ipcDriver.confirmationState = .pending
+        ipcDriver.resolution = .temporarilyUnavailable
+        let ipcClock = ManualActivationClock()
+        let ipcCoordinator = WindowActivationCoordinator(clock: ipcClock, now: { 0 }) { _ in ipcDriver }
+        let target = window(158, title: "Taber", onScreen: false, mode: .raiseWindow, pid: 84)
+
+        XCTAssertEqual(ipcCoordinator.activate(target).outcome, .requested)
+        ipcClock.advance()
+        XCTAssertFalse(ipcDriver.operations.contains("activate"),
+            "Transient AX IPC unavailability must never activate a potentially wrong sibling window")
+
+        // 2. Proven sole off-Space window (.omittedOffSpace) activates on retry to trigger Space transition.
+        let driver = ApplicationFixtureDriver()
+        driver.isMinimized = false
+        driver.confirmationState = .pending
+        driver.resolution = .omittedOffSpace
+        let clock = ManualActivationClock()
+        let coordinator = WindowActivationCoordinator(clock: clock, now: { 0 }) { _ in driver }
+
+        XCTAssertEqual(coordinator.activate(target).outcome, .requested)
+        XCTAssertEqual(driver.operations, ["validate-process", "resolve"])
+
+        clock.advance()
+        XCTAssertEqual(driver.operations, ["validate-process", "resolve", "validate-process", "resolve", "validate-application", "activate"])
+
+        driver.resolution = .found
+        clock.advance()
+        XCTAssertTrue(driver.operations.suffix(3).elementsEqual(["resolve", "focus", "activate"]))
+    }
+
+    func testConsolidatedPlayerPreservesSiblingRecencyAndDetachedPlayerDeprioritizesOnlyObservedHost() async {
+        // 1. Consolidated AXDialog player (windowServerID != presentationWindowID) keeps sibling recency intact.
+        let consolidatedCurrent = window(1, onScreen: true, full: true, bundle: "com.google.Chrome", pid: 42)
+            .withPresentation(windowID: 2, isOnScreen: true)
+            .withActivationMode(.raiseWindow)
+        let secondChrome = window(3, onScreen: false, full: false, bundle: "com.google.Chrome", pid: 42)
+        let otherApp = window(99, onScreen: false, full: false, bundle: "com.apple.TextEdit", pid: 84)
+        let consolidatedHistory = WindowRecencyHistory()
+        consolidatedHistory.touch(otherApp.id)
+        consolidatedHistory.touch(secondChrome.id)
+        consolidatedHistory.touch(consolidatedCurrent.id)
+        let consolidatedOrder = consolidatedHistory.ordered(
+            [consolidatedCurrent, otherApp, secondChrome],
+            current: consolidatedCurrent
+        )
+        XCTAssertEqual(consolidatedOrder.compactMap(\.windowServerID), [1, 3, 99],
+            "Consolidated player already absorbed its host and must not penalize other browser windows")
+
+        // 2. Detached player (windowServerID == presentationWindowID) deprioritizes only the observed host (126).
+        let detachedPlayer = window(270, onScreen: true, full: true, bundle: "com.apple.Safari", pid: 42)
+            .withPresentation(windowID: 270, isOnScreen: true)
+        let safariHost = window(126, onScreen: false, full: false, bundle: "com.apple.Safari", pid: 42)
+        let safariOther = window(130, onScreen: false, full: false, bundle: "com.apple.Safari", pid: 42)
+        let detachedHistory = WindowRecencyHistory()
+        detachedHistory.touch(otherApp.id)
+        detachedHistory.touch(safariOther.id)
+        detachedHistory.observe(pid: 42, birth: nil, windowID: 126, windows: [detachedPlayer, safariHost, safariOther, otherApp])
+        let current = detachedHistory.current(in: [detachedPlayer, safariHost, safariOther, otherApp], frontmostPID: 42, launchDate: nil)
+        XCTAssertEqual(current?.windowServerID, 270)
+        let detachedOrder = detachedHistory.ordered([detachedPlayer, safariHost, safariOther, otherApp], current: current)
+        XCTAssertEqual(detachedOrder.compactMap(\.windowServerID), [270, 130, 99, 126],
+            "Only the observed off-screen host (126) is deprioritized; independent browser window (130) keeps recency")
+    }
+
+    func testTrackingSnapshotPurgesClosedWindowIdentitiesFromRecencyHistory() async {
+        let source = FixtureSource()
+        let w1 = window(1, pid: 42), w2 = window(2, pid: 42), w3 = window(3, pid: 84)
+        source.raw = [w1, w2, w3]
+        source.axByPID = [42: [ax(1, focused: true), ax(2)], 84: [ax(3)]]
+        let manager = WindowManager(source: source)
+        let suite = "com.taber.tests.tracking.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsStore(defaults: defaults)
+        settings.shortcutEnabled = false
+        let history = WindowRecencyHistory()
+        let tracking = WindowTrackingService(manager: manager, settings: settings, history: history)
+        _ = tracking
+
+        manager.refresh()
+        history.touch(w3.id)
+        history.touch(w2.id)
+        history.touch(w1.id)
+        XCTAssertEqual(history.ordered([w1, w2, w3], current: w1).compactMap(\.windowServerID), [1, 2, 3])
+
+        // Close w2 -> snapshot purges w2's stamp; if an identity were reintroduced later in test, its old stamp is gone.
+        source.raw = [w1, w3]
+        source.axByPID = [42: [ax(1, focused: true)], 84: [ax(3)]]
+        manager.refresh()
+        XCTAssertEqual(history.ordered([w1, w2, w3], current: w1).compactMap(\.windowServerID), [1, 3, 2])
+    }
+
+    func testNonBrowserWebViewAppDetachedFullscreenPlayerRemainsSwitchable() async {
+        let source = FixtureSource()
+        source.frontmostPID = 42
+        let notchedPlayerBounds = CGRect(x: 0, y: 38, width: 1710, height: 1074)
+        let host = WindowInfo(id: 501, ownerPID: 42, bundleIdentifier: "com.example.webview-player",
+            applicationName: "WebViewApp", title: "Course Video", bounds: rect,
+            isOnScreen: false, isMinimized: false, isFullScreen: false, icon: nil)
+        let player = WindowInfo(id: 502, ownerPID: 42, bundleIdentifier: "com.example.webview-player",
+            applicationName: "WebViewApp", title: "", bounds: notchedPlayerBounds,
+            isOnScreen: true, isMinimized: false, isFullScreen: false, icon: nil)
+        source.raw = [player, host]
+        source.axByPID = [42: [ax(501, focused: true, title: "Course Video")]]
+        source.locations = [
+            501: ResolvedWindowSpace(identifier: 1, number: 1, isFullScreen: false),
+            502: ResolvedWindowSpace(identifier: 77, number: nil, isFullScreen: true)
+        ]
+
+        let manager = WindowManager(source: source)
+        manager.refresh()
+
+        let discoveredPlayer = manager.windows.first { $0.windowServerID == 502 }
+        XCTAssertNotNil(discoveredPlayer)
+        XCTAssertEqual(discoveredPlayer?.isFullScreen, true)
+        XCTAssertEqual(discoveredPlayer?.presentationWindowID, 502)
+        XCTAssertEqual(discoveredPlayer?.activationMode, .activateApplication)
+        XCTAssertEqual(discoveredPlayer?.isAccessibilityFocused, true)
+    }
+
+    func testUntitledAXFullScreenVideoPlayerDeprioritizesOffScreenHostWindow() {
+        let previousApp = window(1799, title: "Fixture A", onScreen: false, full: false, bundle: "com.example.a", pid: 10)
+        let wkHost = window(1842, title: "Fixture B", onScreen: false, full: false, bundle: "com.example.b", pid: 20)
+        let wkFullScreenVideo = window(1844, title: "", onScreen: true, full: true, bundle: "com.example.b", pid: 20)
+        let allWindows = [wkFullScreenVideo, wkHost, previousApp]
+        let history = WindowRecencyHistory()
+        history.touch(previousApp.id)
+        history.touch(wkHost.id)
+        history.observe(pid: 20, birth: nil, windowID: 1844, windows: allWindows)
+        let current = history.current(in: allWindows, frontmostPID: 20, launchDate: nil)
+        XCTAssertEqual(current?.windowServerID, 1844)
+        let ordered = history.ordered(allWindows, current: current)
+        XCTAssertEqual(ordered.compactMap(\.windowServerID), [1844, 1799, 1842],
+            "Untitled WKFullScreenWindow must place the previous app ahead of its own off-screen host window")
     }
 }

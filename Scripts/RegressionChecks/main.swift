@@ -231,6 +231,20 @@ do {
         "sem documento, a janela AX adjacente é o fallback mais seguro para o host"
     )
 
+    let notchedFullScreenBounds = CGRect(x: 0, y: 38, width: 1710, height: 1074)
+    try expect(
+        WindowMatchingPolicy.requiresApplicationActivation(
+            isPresentationSized: true,
+            hasExactWindowIDMatch: true,
+            isDialog: true,
+            candidateTitle: "YouTube",
+            candidateBounds: notchedFullScreenBounds,
+            accessibilityTitle: "YouTube",
+            accessibilityBounds: notchedFullScreenBounds
+        ),
+        "player fullscreen abaixo do notch do MacBook deve manter ativação preservando a superfície"
+    )
+
     print("PASSOU: \(checks) verificações de regressão")
 } catch let failure as RegressionFailure {
     fputs("FALHOU: \(failure.message)\n", stderr)

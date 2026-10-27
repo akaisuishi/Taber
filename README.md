@@ -157,10 +157,11 @@ WindowServer e `--help` mostra todas as opções.
 ## Arquitetura
 
 - `GlobalShortcutMonitor`: captura global com `CGEventTap` e máquina de estado do atalho.
-- `WindowManager`: enumeração, normalização, ordenação e cache dos metadados de janelas.
+- `WindowManager`: snapshots CG/AX coletados em fila serial, reconciliação e publicação na interface.
+- `WindowTrackingService`: eventos de foco e ciclo de vida, histórico por janela e atualização periódica de três segundos.
 - `WindowEligibilityPolicy`: filtra agentes, helpers, shell do macOS e superfícies técnicas.
 - `WindowMatchingPolicy`: reconcilia WindowServer e Accessibility sem duplicar janelas.
-- `AccessibilityService`: restaura, eleva e focaliza a janela selecionada.
+- `AccessibilityService`: referências AX revalidadas e transações canceláveis de até dois segundos, com confirmação do destino.
 - `SpaceResolver`: identifica o Space associado a cada janela.
 - `WindowThumbnailService`: captura assíncrona e cache limitado de miniaturas.
 - `SwitcherPanelController`: mantém um único painel reutilizável para todos os visuais.
@@ -170,6 +171,12 @@ WindowServer e `--help` mostra todas as opções.
 
 O Taber não envia títulos, imagens ou conteúdo das janelas para nenhum serviço. A enumeração, a busca e as miniaturas são processadas no próprio Mac.
 
+## Atalhos no alternador
+
+`Command + M` não remove uma janela do Taber: ao selecioná-la, o Taber a restaura
+antes de focar. Enquanto o alternador estiver aberto, `Command + Q` encerra o
+aplicativo da janela selecionada, sem trazê-la para a frente primeiro.
+
 ## Versionamento
 
 Este repositório começou no estado consolidado do **Taber 1.0.1 (build 3)**. A versão atual é **Taber 1.2.3 (build 11)**. Como não existia um repositório Git antes do primeiro marco, versões intermediárias anteriores não foram recriadas artificialmente. Os commits seguem [Conventional Commits](https://www.conventionalcommits.org/), por exemplo `feat:`, `fix:`, `perf:`, `docs:` e `chore:`.
@@ -177,3 +184,20 @@ Este repositório começou no estado consolidado do **Taber 1.0.1 (build 3)**. A
 Consulte as [correções e validações da 1.2.3](Docs/Release-1.2.3.md), [tela cheia na 1.2.2](Docs/Release-1.2.2.md), [Finder na 1.2.1](Docs/Release-1.2.1.md) e o [histórico detalhado da 1.1.0](Docs/Release-1.1.0.md).
 
 O código é privado e ainda não possui licença de distribuição pública.
+
+
+## Candidata 1.3.0 (build 12)
+
+A versão 1.3.0 está em validação, sem aprovação de entrega. A instalação publicada
+continua sendo 1.2.3. Consulte [o registro de validação](Docs/Validation-1.3.0.md)
+para resultados, limitações e critérios de aprovação.
+
+Em **Permissões e sobre**, o controle **Diagnóstico local de alternância** habilita
+um arquivo JSONL temporário por processo. **Mostrar arquivo de diagnóstico** abre
+sua localização no Finder. Ele registra identidade opaca/numérica, foco observado,
+resultado e duração; não inclui títulos, caminhos dos documentos ou miniaturas.
+Desligue o controle ao terminar. Nenhum registro é enviado automaticamente.
+
+O lote de [otimização das prévias](Docs/Performance-Previews.md) reduz capturas
+repetidas, limita concorrência e reaproveita imagens durante a atualização.
+O documento distingue os resultados dos testes das medições reais ainda pendentes.

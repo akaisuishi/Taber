@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 import os
 
-struct ResolvedWindowSpace {
+struct ResolvedWindowSpace: Sendable {
     let identifier: UInt64
     let number: Int?
     let isFullScreen: Bool
@@ -11,15 +11,15 @@ struct ResolvedWindowSpace {
     var isOnAllDesktops = false
 }
 
-struct SpaceLocation: Hashable {
+struct SpaceLocation: Hashable, Sendable {
     let identifier: UInt64
     let number: Int?
     let isFullScreen: Bool
     let displayIdentifier: String
 }
 
-@MainActor
-final class SpaceResolver {
+final class SpaceResolver: @unchecked Sendable {
+    private let lock = NSLock()
     static let shared = SpaceResolver()
 
     private typealias MainConnectionFunction = @convention(c) () -> Int32
@@ -60,6 +60,8 @@ final class SpaceResolver {
     }
 
     func resolve(windowIDs: [CGWindowID]) -> [CGWindowID: ResolvedWindowSpace] {
+        lock.lock()
+        defer { lock.unlock() }
         guard let connection,
               let copyManagedSpaces,
               let copySpacesForWindows,

@@ -45,6 +45,10 @@ final class SwitcherViewModel: ObservableObject {
         transparencyPercent = TaberTransparencyPolicy.normalizedPercent(percent)
     }
 
+    func updateWindowList(windows: [WindowInfo], selectedIndex: Int) {
+        self.windows = windows; self.selectedIndex = selectedIndex
+    }
+
     func select(index: Int) {
         selectedIndex = index
     }
@@ -89,7 +93,7 @@ final class SwitcherPanelController {
         panel.hasShadow = true
         panel.isMovable = false
         panel.hidesOnDeactivate = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .stationary, .ignoresCycle]
         panel.contentViewController = hostingController
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
@@ -132,8 +136,13 @@ final class SwitcherPanelController {
             transparencyEnabled: transparencyEnabled,
             transparencyPercent: transparencyPercent
         )
-        panel.level = .statusBar
+        panel.level = .popUpMenu
         panel.orderFrontRegardless()
+    }
+
+    func updateWindowList(windows: [WindowInfo], selectedIndex: Int) {
+        resizeAndCenter(for: model.style, windows: windows, size: model.size, isSearching: model.isSearching)
+        model.updateWindowList(windows: windows, selectedIndex: selectedIndex)
     }
 
     func update(selectedIndex: Int) {
@@ -188,6 +197,7 @@ final class SwitcherPanelController {
     }
 
     func hide() {
+        if !model.isDemo { WindowThumbnailService.shared.endPresentation() }
         panel.orderOut(nil)
         panel.level = .normal
         model.isDemo = false

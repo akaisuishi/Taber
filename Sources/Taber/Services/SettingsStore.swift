@@ -17,6 +17,10 @@ final class SettingsStore: ObservableObject {
 
     private let defaults: UserDefaults
 
+    @Published var diagnosticsEnabled: Bool {
+        didSet { defaults.set(diagnosticsEnabled, forKey: "diagnosticsEnabled") }
+    }
+
     @Published var settingsSection: String {
         didSet { defaults.set(settingsSection, forKey: "settingsSection") }
     }
@@ -63,6 +67,7 @@ final class SettingsStore: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        diagnosticsEnabled = defaults.bool(forKey: "diagnosticsEnabled")
         settingsSection = defaults.string(forKey: "settingsSection") ?? "appearance"
         shortcutEnabled = defaults.object(forKey: Keys.shortcutEnabled) as? Bool ?? true
         includeUtilityWindows = defaults.object(forKey: Keys.includeUtilityWindows) as? Bool ?? false

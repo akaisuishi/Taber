@@ -109,6 +109,24 @@ enum WindowMatchingPolicy {
         return true
     }
 
+    static func canTerminateApplication(
+        expectedPID: pid_t,
+        expectedBundleIdentifier: String,
+        expectedLaunchDate: Date?,
+        actualPID: pid_t,
+        actualBundleIdentifier: String?,
+        actualLaunchDate: Date?
+    ) -> Bool {
+        representsSameProcess(
+            expectedPID: expectedPID,
+            expectedBundleIdentifier: expectedBundleIdentifier,
+            expectedLaunchDate: expectedLaunchDate,
+            actualPID: actualPID,
+            actualBundleIdentifier: actualBundleIdentifier,
+            actualLaunchDate: actualLaunchDate
+        )
+    }
+
     static func preferredFrontmostIndex(
         frontmostPID: pid_t?,
         candidates: [(ownerPID: pid_t, isMinimized: Bool, isFocused: Bool)]

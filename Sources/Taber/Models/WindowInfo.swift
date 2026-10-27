@@ -34,7 +34,8 @@ enum WindowSpaceState {
 
 enum WindowActivationMode { case raiseWindow, activateApplication }
 
-struct WindowInfo: Identifiable, Hashable {
+// Icon references are immutable after capture; drawing stays on the main actor.
+struct WindowInfo: Identifiable, Hashable, @unchecked Sendable {
     let id: WindowIdentity
     let windowServerID: CGWindowID?
     let ownerPID: pid_t
@@ -44,7 +45,7 @@ struct WindowInfo: Identifiable, Hashable {
     let bundleIdentifier: String, applicationName: String
     private(set) var title: String
     let bounds: CGRect
-    let isOnScreen: Bool
+    private(set) var isOnScreen: Bool
     private(set) var isMinimized: Bool
     private(set) var isFullScreen: Bool
     private(set) var presentationWindowID: CGWindowID? = nil
@@ -146,11 +147,17 @@ struct WindowInfo: Identifiable, Hashable {
         copy.isFullScreen = isFullScreen || (resolvedSpace?.isFullScreen ?? false)
         return copy
     }
-    func withPresentation(windowID: CGWindowID?) -> WindowInfo {
+    func withPresentation(windowID: CGWindowID?, isOnScreen: Bool? = nil) -> WindowInfo {
         var copy = self
         copy.presentationWindowID = windowID
+        if let isOnScreen { copy.isOnScreen = isOnScreen }
         copy.isFullScreen = true
         copy.activationMode = .activateApplication
+        return copy
+    }
+    func withAccessibilityFocused(_ isFocused: Bool) -> WindowInfo {
+        var copy = self
+        copy.isAccessibilityFocused = isFocused
         return copy
     }
     func withActivationMode(_ mode: WindowActivationMode) -> WindowInfo {
